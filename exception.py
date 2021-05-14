@@ -1,0 +1,4 @@
+
+class DTException(Exception):
+    pass
+
