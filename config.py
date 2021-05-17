@@ -1,5 +1,5 @@
 import os, json
-import exception
+from exception import *
 
 class DTConfiguration:
     """
@@ -8,7 +8,7 @@ class DTConfiguration:
     __dtrcFilename = '~/.dmrtestconf.json'
     
     def __init__(self):
-        self.config = dict(scenarios={}, parameters={}}
+        self.config = dict(scenarios={}, parameters={})
         self.read(DTConfiguration.__dtrcFilename)
     
     def read(self, filename):

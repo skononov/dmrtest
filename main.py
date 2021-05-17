@@ -2,6 +2,7 @@ import os, sys
 import tkinter as tk
 
 from widgets import *
+from exception import *
 
 __appname: str = 'DMR TEST'
 __version__: str = ''
