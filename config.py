@@ -17,7 +17,7 @@ class DTConfiguration:
                 self.config = json.load(file)
             print(f'Configuration loaded from {filename}')
         except:
-            raise DTException(f'DTConfiguration.read(): {filename}: could not open file for reading')
+            print(f'DTConfiguration.read(): {filename}: could not open file for reading. Use default configuration.')
 
     def write(self, filename):
         try:
