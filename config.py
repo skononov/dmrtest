@@ -6,6 +6,9 @@ class DTConfiguration:
     Configuration manager for the DMR TESTER GUI
     """
     __dtrcFilename = '~/.dmrtestconf.json'
+
+    __appname__ = 'DMR TEST'
+    __version__ = '0.1'
     
     def __init__(self):
         self.config = dict(scenarios={}, parameters={})

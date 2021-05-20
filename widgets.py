@@ -4,12 +4,16 @@ import scipy
 from math import pi
 import matplotlib as mpl
 import tkinter as tk
+import tkinter.messagebox as tkmsg
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from config import DTConfiguration
 from tasks import dtTaskHandlers
+from singleton import Singleton
+#import dialogs as dlg
+
 
 mpl.rcParams["figure.facecolor"] = '#1F1F1F'
 mpl.rcParams["figure.dpi"] = 100
@@ -18,104 +22,136 @@ mpl.rcParams["grid.linewidth"] = 0.5
 mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["font.size"] = 12
 
-_darkBG = '#1F1F1F'
-_lightBG = '#2E2E2E'
-_btnBG = '#505050'
-_hlBG = '#6F6F6F'
-_fg = 'white'
-_font = ('Helvetica', 14)
+_rootWindowGeometry = "640x480+400+320"
+LEFT_PANEL_WIDTH = 400
+
+DEFAULT_BG_COLOR = '#1F1F1F'
+LIGHT_BG_COLOR = '#2E2E2E'
+BUTTON_BG_COLOR = '#505050'
+HIGHLIGHTED_BG_COLOR = '#6F6F6F'
+DEFAULT_FG_COLOR = 'white'
+
+DEFAULT_FONT_FAMILY   = "Helvetica"
+MONOSPACE_FONT_FAMILY = "lucidasanstypewriter"
+DEFAULT_FONT_SIZE     = 10
+BIG_FONT_SIZE         = 12
+SMALL_FONT_SIZE       =  9
 
 
-class DTApplication(tk.Tk):
+class DTApplication(metaclass=Singleton):
     __dtTkOptionFilename = '~/.dtstyle'
-    __appname: str = 'DMR TEST'
-    __version__: str = ''
 
     def __init__(self):
-        super().__init__()
-        self.geometry("640x480+400+320")
-        self.title(DTApplication.__appname+' '+ DTApplication.__version__)
-        
+        self.root = tk.Tk()
+
+        self.root.geometry(_rootWindowGeometry)
+        self.root.title(DTConfiguration.__appname__+' '+ DTConfiguration.__version__)
+
+        # set styles
         self.defaultStyle()
         if os.access(DTApplication.__dtTkOptionFilename, os.R_OK):
             self.readStyle(DTApplication.__dtTkOptionFilename)
-#        self.columnconfigure(0, minsize=460, pad=0)
-#        self.columnconfigure(1, minsize=120, pad=0)
-#        self.rowconfigure(0, minsize=460, pad=0)
 
-        logo = DTLogoFrame(self)
-        logo.grid(row=0, column=0)
-        logo.configure(width=460, height=460)
-        logo.grid_propagate(0)
+        self.mainMenuWindow = DTMainMenuWindow(self.root)
+        self.measurementWindow = DTMeasurementWindow(self.root)
 
-        mainMenu = DTMainMenuFrame(self)
-        mainMenu.grid(row=0, column=1)
-        mainMenu.configure(width=120, height=460)
-        mainMenu.grid_propagate(0)
+        self.mode = 'main'
+        self.render()
+
+    def render(self):
+        for child in self.root.winfo_children():
+            child.forget()
+        if self.mode == 'main':
+            self.mainMenuWindow.pack(fill=tk.BOTH)
+        elif self.mode == 'meas':
+            self.measurementWindow.pack(fill=tk.BOTH)
+        else:
+            tkmsg.showerror("Error", "Unknown window mode!")
 
     def readStyle(self, filename: str):
+        self.root.option_clear()
         try:
-            self.option_readfile(filename)
+            self.root.option_readfile(filename)
         except tk.TclError:
             print(f'DTApplication.readStyle(): Can not read Tk option file {filename}')
 
     def defaultStyle(self):
-        self.configure(bg=_lightBG)
-        self.option_add('*DTLogoFrame.background', _darkBG)
-        self.option_add('*DTMainMenuFrame.background', _darkBG)
-        self.option_add('*DTPlotFrame.background', _darkBG)
-        self.option_add('*Label.background', _darkBG)
-        self.option_add('*Button.background', _btnBG)
-        self.option_add('*Menubutton.background', _btnBG)
-        self.option_add('*Menu.background', _lightBG)
-        self.option_add('*Button.activebackground', _hlBG)
-        self.option_add('*Menubutton.activebackground', _hlBG)
-        self.option_add('*Menu.activebackground', _hlBG)
-        self.option_add('*Label.foreground', _fg)
-        self.option_add('*Button.foreground', _fg)
-        self.option_add('*Menubutton.foreground', _fg)
-        self.option_add('*font', _font)
+        self.root.option_clear()
+        self.root.option_add('*DTApplication.background', LIGHT_BG_COLOR)
+        self.root.option_add('*background', DEFAULT_BG_COLOR)
+        self.root.option_add('*Button.background', BUTTON_BG_COLOR)
+        self.root.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        self.root.option_add('*foreground', DEFAULT_FG_COLOR)
+        self.root.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
+        self.root.option_add('*Button.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
+        self.root.option_add('*Menubutton.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
+
+        #self.root.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*Label.background', DEFAULT_BG_COLOR)
+        #self.root.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        #self.root.option_add('*Menu.background', _lightBG)
+        #self.root.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.root.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.root.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.root.option_add('*Label.foreground', DEFAULT_FG_COLOR)
+        #self.root.option_add('*Button.foreground', DEFAULT_FG_COLOR)
+        #self.root.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
 
     def run(self):
-        self.mainloop()
+        self.root.mainloop()
 
     def stop(self):
-        self.destroy()
+        self.root.destroy()
 
-class DTLogoFrame(tk.Frame):
+class DTLogoFrame(tk.Frame, metaclass=Singleton):
 
-    def __init__(self, master=None, text=None, logofilename=None):
+    def __init__(self, master, text=None, logofilename=None):
         super().__init__(master, class_='DTLogoFrame')
         self.configure(padx=10, pady=10, relief=tk.GROOVE)
         
         if text is None:
-            text = """
-            Информация о приложении\n и копирайте.
+            text = f"""
+            Информация о приложении {DTConfiguration.__appname__} {DTConfiguration.__version__}.
+            Информация о приложении {DTConfiguration.__appname__} {DTConfiguration.__version__}.
+            Информация о приложении {DTConfiguration.__appname__} {DTConfiguration.__version__}.
             """
         if logofilename is None and os.access('img/logo.gif', os.R_OK):
             logofilename = 'img/logo.gif'
         self.image = tk.PhotoImage(file=logofilename)
 
-        label = tk.Label(self,
-                         text=text,
-                         compound=tk.TOP,
-                         image=self.image,
-#                         anchor=tk.NW,
-#                         width=60, height=45,
-                         padx=3, pady=3)
-        label.grid()
+        logo = tk.Label(self, image=self.image, padx=5, pady=5)
+        logo.pack(side=tk.TOP)
 
-class DTPlotFrame(tk.Frame):
+        # add a text Frame
+        textboxFrame = tk.Frame(self, borderwidth=10)
+        textboxFrame.pack(side=tk.BOTTOM, fill=tk.BOTH)
+        textbox = tk.Text(textboxFrame, padx="2m", pady="1m", wrap=tk.WORD)
 
-    def __init__(self, master=None):
+        # add a vertical scrollbar to the frame
+        ##rightScrollbar = tk.Scrollbar(textboxFrame, orient=tk.VERTICAL, command=textbox.yview)
+        ##textbox.configure(yscrollcommand = rightScrollbar.set)
+        ##rightScrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        textbox.pack(side=tk.TOP, fill=tk.BOTH)
+        textbox.insert(tk.END, text, "normal")
+        textbox.configure(state=tk.DISABLED)
+
+
+class DTPlotFrame(tk.Frame, metaclass=Singleton):
+    def __init__(self, master):
         super().__init__(master, bg='#3E3E3E', class_='DTPlotFrame')
-        self.configure(padx=20, pady=20)
-        self.grid(columns=0, columnspan=3, row=0)
+        self.figure = None
         self.createCanvas()
         self.gridOn = True
     
     def createCanvas(self):
-        self.figure = Figure(figsize=(5, 5))
+        if self.figure is not None:
+            del self.figure
+        self.figure = Figure(figsize=(3.5, 3.5))
         self.figure.add_subplot(111)
 
         # example plot
@@ -123,45 +159,102 @@ class DTPlotFrame(tk.Frame):
         y = np.sin(x)/x
         self.plotGraph(x, y)
 
-    def plotGraph(self, x, y):
-        ax = self.figure.add_subplot(111)
+    def plotGraph(self, x, y, new=True):
+        ax = self.figure.axes
+        if new or ax is None:
+            self.figure.clf()
+            ax = self.figure.add_subplot(111)
         ax.plot(x, y, 'w')
         ax.grid(self.gridOn, 'major')
 
     def clearCanvas(self):
         self.figure.clf()
 
-class DTMainMenuFrame(tk.Frame):
+class DTMainMenuWindow(tk.Frame, metaclass=Singleton):
     
-    def __init__(self, master=None):
-        super().__init__(master, class_='DTMainMenuFrame')
-        self.configure(padx=10, pady=10, relief=tk.GROOVE)
-        
-        self.rowconfigure(0, minsize=30, pad=20)
-        self.rowconfigure(1, minsize=30, pad=20)
-        self.rowconfigure(2, minsize=30, pad=20)
+    def __init__(self, master):
+        super().__init__(master, class_='DTMainMenuWindow')
+        self.configure(padx=10, pady=10)
 
-        csmb = self.chooseScenarioMB = tk.Menubutton(master=self, text='Запустить сценарий', relief=tk.RAISED)
+        self.menuFrame = tk.Frame(self, padx=5)
+        self.menuFrame.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.logoFrame = DTLogoFrame(self)
+        self.logoFrame.pack(side=tk.LEFT, expand=tk.YES, fill=tk.BOTH)
+
+        for i in range(3):
+            self.menuFrame.rowconfigure(i, minsize=50, pad=10)
+
+        csmb = self.chooseScenarioMB = tk.Menubutton(master=self.menuFrame, text='Запустить сценарий')
+        csmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
         csmb.grid(row=0)
         csmb.menu = DTChooseScenarioMenu(self.chooseScenarioMB)
+        csmb['menu'] = csmb.menu
+        csmb.focus_set()
 
-        cmmb = self.chooseMeasurementMB = tk.Menubutton(master=self, text='Запустить измерение', relief=tk.RAISED)
+        cmmb = self.chooseMeasurementMB = tk.Menubutton(master=self.menuFrame, text='Запустить измерение')
+        cmmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
         cmmb.grid(row=1)
         cmmb.menu = DTChooseMeasurementMenu(self.chooseMeasurementMB)
+        cmmb['menu'] = cmmb.menu
 
-        csb = self.newScenarioMB = tk.Button(master=self, text='Создать сценарий', 
-                command=self.newScenario, relief=tk.RAISED)
+        csb = self.newScenarioMB = tk.Button(master=self.menuFrame, text='Создать сценарий', command=self.newScenario)
+        csb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0)
         csb.grid(row=2)
-
 
     def newScenario(self):
         pass
         
+class DTMeasurementWindow(tk.Frame, metaclass=Singleton):
+    pass
+    """
+    def __init__(self, master):
+        super().__init__(master, class_='DTMeasurementWindow')
+        self.configure(padx=10, pady=10)
+
+        self.leftFrame = tk.Frame(self)
+        self.rightFrame = tk.Frame(self)
+
+        self.paramFrame = tk.Frame(self)
+        self.paramFrame.pack(row=0, column=0, sticky=tk.NW)
+
+        self.resultFrame = tk.Frame(self, padx=4, pady=3)
+        self.resultFrame.grid(row=0, column=1, sticky=tk.NE)
+
+        self.menuFrame = tk.Frame(self, padx=4, pady=3)
+        self.menuFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
+
+        self.plotFrame = DTPlotFrame(self)
+        self.plotFrame.grid(side=tk.LEFT, expand=tk.YES, fill=tk.BOTH)
+
+        for i in range(3):
+            self.menuFrame.rowconfigure(i, minsize=100, pad=20)
+
+        csmb = self.chooseScenarioMB = tk.Menubutton(master=menuFrame, text='Запустить сценарий')
+        csmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
+        csmb.grid(row=0)
+        csmb.menu = DTChooseScenarioMenu(self.chooseScenarioMB)
+        csmb['menu'] = csmb.menu
+        csmb.focus_set()
+
+        cmmb = self.chooseMeasurementMB = tk.Menubutton(master=menuFrame, text='Запустить измерение')
+        cmmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
+        cmmb.grid(row=1)
+        cmmb.menu = DTChooseMeasurementMenu(self.chooseMeasurementMB)
+        cmmb['menu'] = cmmb.menu
+
+        csb = self.newScenarioMB = tk.Button(master=menuFrame, text='Создать сценарий', command=self.newScenario)
+        csb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0)
+        csb.grid(row=2)
+
+    def update(self):
+        pass
+    """
 
 class DTChooseScenarioMenu(tk.Menu):
 
     def __init__(self, menubutton):
-        super().__init__(tearoff = 0)
+        super().__init__(menubutton, tearoff = 0)
 
         config = DTConfiguration()
         self.scenarios = config.scenarios
@@ -179,7 +272,7 @@ class DTChooseScenarioMenu(tk.Menu):
 class DTChooseMeasurementMenu(tk.Menu):
 
     def __init__(self, menubutton):
-        super().__init__(tearoff = 0)
+        super().__init__(menubutton, tearoff = 0)
 
         for task, handler in dtTaskHandlers.items():
             self.add_command(label=task, command=handler)
