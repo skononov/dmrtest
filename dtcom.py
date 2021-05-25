@@ -14,8 +14,8 @@ class DTSerialCom(metaclass=Singleton):
     def __init__(self, device='/dev/ttyACM0', timeout=1):
         try:
             self.port = serial.Serial(device, timeout=timeout)
-        except serial.SerialException:
-            raise DTComError('DTSerialCom()', f'Opening device {device} failed. Device is offline?')
+        except serial.SerialException as exc:
+            raise DTComError('DTSerialCom()', f'Opening device {device} failed. Device is offline?') from exc
 
     @property
     def timeout(self):
@@ -126,4 +126,5 @@ class DTSerialCom(metaclass=Singleton):
             time.sleep(0.2)
 
     def __del__(self):
-        self.port.close()
+        if hasattr(self, 'port'):
+            self.port.close()
