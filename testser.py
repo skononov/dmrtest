@@ -9,6 +9,6 @@ com = DTSerialCom(device='/dev/ttyACM0', timeout=2)
 
 print('Sending STATUS command')
 
-reply = com.command('STATUS', nreply=1)
+reply = com.command(b'STATUS', nreply=1)
 
 print('Received:', reply)
