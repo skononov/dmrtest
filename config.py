@@ -1,73 +1,93 @@
 import os, json
-from exception import *
+from exception import DTError
 
 class DTConfiguration:
     """
-    Configuration manager for the DMR TESTER GUI
+    Configuration manager for the DMR TESTER GUI.
+    
+    Scenario is a dict of tasks with a task name being a key and dict of parameters being a value. Task parameters are 
+    stored as dictionaries with one obligatory element 'value' and two optional elements: 'minValue', 'maxValue'.
     """
     __dtrcFilename = '~/.dmrtestconf.json'
 
     __appname__ = 'DMR TEST'
     __version__ = '0.1'
     
-    def __init__(self):
-        self.config = dict(scenarios={}, parameters={})
-        self.read(DTConfiguration.__dtrcFilename)
+    def __init__(self, filename=None):
+        self.config = dict(scenarios={})
+        if filename is not None:
+            self.load(filename)
+        else:
+            self.load(DTConfiguration.__dtrcFilename)
     
-    def read(self, filename):
+    def load(self, filename):
         try:
             with open(filename, 'r') as file:
                 self.config = json.load(file)
             print(f'Configuration loaded from {filename}')
-        except:
-            print(f'DTConfiguration.read(): {filename}: could not open file for reading. Use default configuration.')
+        except Exception as exc:
+            print(exc)
+            print(f'DTConfiguration.load(): {filename}: could not open file for reading. Use default configuration.')
 
-    def write(self, filename):
+    def save(self, filename):
         try:
             with open(filename, 'w') as file:
                 json.dump(self.config, file)
             print(f'Configuration saved to {filename}')
-        except:
-            raise DTException(f'DTConfiguration.write(): {filename}: could not open file for writing')
+        except Exception as exc:
+            raise DTError('DTConfiguration.save()', f'{filename}: could not open file for writing') from exc
 
     @property
     def scenarios(self):
         return self.config['scenarios']
 
-    @property
-    def parameters(self):
-        return self.config['parameters']
-
     def scenario(self, name):
         try:
             return self.config['scenarios'][name]
-        except KeyError:
-            raise DTException(f'DTConfiguration.scenario(): scenario "{name}" is not defined')
+        except KeyError as exc:
+            raise DTError('DTConfiguration.scenario()', f'Scenario "{name}" is not defined') from exc
 
-    def add_task(self, scenario, task):
-        try:
-            if self.config['scenarios'][scenario] is None:
-                self.config['scenarios'][scenario] = list()
-            self.config['scenarios'][scenario].append(task)
-        except KeyError:
-            raise DTException(f'DTConfiguration.add_task(): scenario "{scenario}" is not defined')
+    def add_task(self, scenario, task, params=None):
+        if params is None:
+            params = dict()
+        if scenario not in self.config['scenarios']:
+            self.config['scenarios'][scenario] = {task: params}
+        elif task in self.config['scenarios'][scenario]:
+            print(f'DTConfiguration.add_task(): Task {task} is already defined for scenario {scenario}')
+        else:
+            self.config['scenarios'][scenario][task] = params
 
     def del_scenario(self, name):
         try:
             del self.config['scenarios'][name]
         except KeyError:
-            raise DTException(f'DTConfiguration.del_scenario(): no scenario "{name}" defined.')
+            print('DTConfiguration.del_scenario(): No scenario "{name}" defined.')
+
+    def del_task(self, scenario, task):
+        try:
+            sctasks = self.config['scenarios'][scenario]
+        except KeyError:
+            raise DTError('DTConfiguration.del_task()', f'No scenario {scenario} defined.')
+        else:
+            for i, t in enumerate(sctasks):
+                if task == t['task']:
+                    sctasks.pop(i)
+                    break
 
     def clear_scenarios(self):
         self.config['scenarios'] = {}
 
-    def set_parameter_limits(self, task, param, minval, maxval):
-        if task not in self.config['parameters']:
-            self.config['parameters'][task] = dict()
-        self.config['parameters'][task][param] = dict(minValue=minval, maxValue=maxval)
+    def set_parameter(self, scenario, task, param, value, minval=None, maxval=None):
+        scenarios = self.config['scenarios']
+        if scenario in scenarios:
+            if task not in scenarios[scenario]:
+                scenarios[scenario][task] = dict()
+            else:
+                
+                self.config['parameters'][task][param] = dict(value=value, minValue=minval, maxValue=maxval)
 
     def del_parameter(self, task, param):
         try:
             del self.config['parameters'][task][param]
         except KeyError:
-            raise DTException(f'DTConfiguration.del_parameter(): no task "{task}" or parameter "{param}" defined.')
+            raise DTError('DTConfiguration.del_parameter()', f'No task "{task}" or parameter "{param}" defined.')

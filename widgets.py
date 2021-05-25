@@ -23,6 +23,7 @@ mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["font.size"] = 12
 
 _rootWindowGeometry = "640x480+400+320"
+_dialogWindowGeometry = "+400+320"
 LEFT_PANEL_WIDTH = 400
 
 DEFAULT_BG_COLOR = '#1F1F1F'
@@ -38,74 +39,73 @@ BIG_FONT_SIZE         = 12
 SMALL_FONT_SIZE       =  9
 
 
-class DTApplication(metaclass=Singleton):
+class DTApplication(tk.Tk, metaclass=Singleton):
     __dtTkOptionFilename = '~/.dtstyle'
 
     def __init__(self):
-        self.root = tk.Tk()
-
-        self.root.geometry(_rootWindowGeometry)
-        self.root.title(DTConfiguration.__appname__+' '+ DTConfiguration.__version__)
+        super().__init__()
+        self.geometry(_rootWindowGeometry)
+        self.title(DTConfiguration.__appname__+' '+ DTConfiguration.__version__)
 
         # set styles
         self.defaultStyle()
         if os.access(DTApplication.__dtTkOptionFilename, os.R_OK):
             self.readStyle(DTApplication.__dtTkOptionFilename)
 
-        self.mainMenuWindow = DTMainMenuWindow(self.root)
-        self.measurementWindow = DTMeasurementWindow(self.root)
+        self.mainMenuFrame = DTMainMenuFrame(self)
+        self.measurementFrame = DTMeasurementFrame(self)
 
         self.mode = 'main'
         self.render()
 
     def render(self):
-        for child in self.root.winfo_children():
+        for child in self.winfo_children():
             child.forget()
         if self.mode == 'main':
-            self.mainMenuWindow.pack(fill=tk.BOTH)
+            self.mainMenuFrame.pack(fill=tk.BOTH)
         elif self.mode == 'meas':
-            self.measurementWindow.pack(fill=tk.BOTH)
+            self.measurementFrame.pack(fill=tk.BOTH)
         else:
             tkmsg.showerror("Error", "Unknown window mode!")
 
     def readStyle(self, filename: str):
-        self.root.option_clear()
+        self.option_clear()
         try:
-            self.root.option_readfile(filename)
+            self.option_readfile(filename)
         except tk.TclError:
             print(f'DTApplication.readStyle(): Can not read Tk option file {filename}')
 
     def defaultStyle(self):
-        self.root.option_clear()
-        self.root.option_add('*DTApplication.background', LIGHT_BG_COLOR)
-        self.root.option_add('*background', DEFAULT_BG_COLOR)
-        self.root.option_add('*Button.background', BUTTON_BG_COLOR)
-        self.root.option_add('*Menubutton.background', BUTTON_BG_COLOR)
-        self.root.option_add('*foreground', DEFAULT_FG_COLOR)
-        self.root.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
-        self.root.option_add('*Button.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
-        self.root.option_add('*Menubutton.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
+        self.option_clear()
+        self.option_add('*DTApplication.background', LIGHT_BG_COLOR)
+        self.option_add('*background', DEFAULT_BG_COLOR)
+        self.option_add('*Button.background', BUTTON_BG_COLOR)
+        self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        self.option_add('*foreground', DEFAULT_FG_COLOR)
+        self.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
+        self.option_add('*Button.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
+        self.option_add('*Menubutton.font', f'{DEFAULT_FONT_FAMILY} {BIG_FONT_SIZE}')
 
-        #self.root.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*Label.background', DEFAULT_BG_COLOR)
-        #self.root.option_add('*Menubutton.background', BUTTON_BG_COLOR)
-        #self.root.option_add('*Menu.background', _lightBG)
-        #self.root.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.root.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.root.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.root.option_add('*Label.foreground', DEFAULT_FG_COLOR)
-        #self.root.option_add('*Button.foreground', DEFAULT_FG_COLOR)
-        #self.root.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
+        #self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        #self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        #self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        #self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        #self.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
+        #self.option_add('*Label.background', DEFAULT_BG_COLOR)
+        #self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        #self.option_add('*Menu.background', _lightBG)
+        #self.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
+        #self.option_add('*Label.foreground', DEFAULT_FG_COLOR)
+        #self.option_add('*Button.foreground', DEFAULT_FG_COLOR)
+        #self.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
 
     def run(self):
-        self.root.mainloop()
+        self.mainloop()
 
     def stop(self):
-        self.root.destroy()
+        self.destroy()
 
 class DTLogoFrame(tk.Frame, metaclass=Singleton):
 
@@ -170,7 +170,7 @@ class DTPlotFrame(tk.Frame, metaclass=Singleton):
     def clearCanvas(self):
         self.figure.clf()
 
-class DTMainMenuWindow(tk.Frame, metaclass=Singleton):
+class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
     
     def __init__(self, master):
         super().__init__(master, class_='DTMainMenuWindow')
@@ -204,8 +204,32 @@ class DTMainMenuWindow(tk.Frame, metaclass=Singleton):
 
     def newScenario(self):
         pass
+
+class DTNewScenarioDialog(tk.Tk):
+
+    def __init__(self):
+        super().__init__()
+        self.geometry(_dialogWindowGeometry)
+        self.title('Создать новый сценарий')
+
+        frame = tk.Frame(self, padx=5, pady=5)
+        frame.pack(side=tk.TOP)
+
+        tk.Label(frame, text='Название сценария:').grid(column=0, row=0, sticky=tk.E)
+
+        self.namevar = tk.StringVar()
+        nameentry = tk.Entry(frame, textvariable=self.namevar)
+        nameentry.grid(column=1, row=0, sticky=tk.W+tk.E)
+        nameentry.focus()
+
+        self.tasklist = tk.Listbox(frame, height=7)
         
-class DTMeasurementWindow(tk.Frame, metaclass=Singleton):
+        
+
+
+
+
+class DTMeasurementFrame(tk.Frame, metaclass=Singleton):
     pass
     """
     def __init__(self, master):
