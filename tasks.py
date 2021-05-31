@@ -15,9 +15,10 @@ class DTTask:
                             "Установлен PLL модулятора", "Установлен PLL демодулятора",
                             "Загружены данные в модулятор", "Ошибка загрузки данных в модулятор")
 
-    def __init__(self):
+    def __init__(self, name=None):
         self.com = DTSerialCom() # used serial instance
 
+        self.name = name # name of the task
         self.parameters = dict() # parameters of the task
         self.results = dict() # results of the measurement
         self.message = '' # message to be shown
@@ -45,6 +46,7 @@ class DTCalibrate(DTTask):
     """
     def __init__(self):
         super().__init__()
+        self.name = 'Калибровка'
 
     def __call__(self):
         self.completed = self.failed = False
@@ -78,6 +80,7 @@ class DTMeasurePower(DTTask):
     """
     def __init__(self, avenum: int = 1, att: int = 0):
         super().__init__()
+        self.name = 'Измерение мощности'
         self.parameters['AVENUM'] = int(min(avenum, 2**32-1))
         self.parameters['ATT'] = att
 
@@ -104,6 +107,7 @@ class DTMeasureInputFrequency(DTTask):
     """
     def __init__(self, frequency: int = 100*kHz, foffset: int = 1*kHz):
         super().__init__()
+        self.name = 'Измерение входной частоты'
         self.parameters['FREQUENCY'] = frequency
         self.parameters['FREQUENCY OFFSET'] = foffset
         self.bufsize = 1000 # buffer size for frequency measurement
@@ -113,7 +117,7 @@ class DTMeasureInputFrequency(DTTask):
             self.com.command(b'SET MEASST', 1)
             isset = False
             for fshift in (0, -5, 5):
-                setfreq += fshift
+                setfreq = self.parameters['FREQUENCY'] + fshift
                 
                 #regs = encodePLL(setfreq)
                 regs = [0]*6 # temporary
