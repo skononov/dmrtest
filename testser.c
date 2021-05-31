@@ -61,8 +61,10 @@ const char* strpollflags(int revents)
         if ((revents&flags[i]) != 0) {
             if (str[0] == 0) 
                 strcpy(str, sflags[i]);
-            else
-                snprintf(str, 1000, "%s|%s", str, sflags[i]);
+            else {
+                strncat(str, "|", 2);
+                strcat(str, sflags[i]);
+            }
         }
     }
     if (str[0] == 0)
