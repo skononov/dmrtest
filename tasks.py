@@ -5,7 +5,6 @@ from dtcom import DTSerialCom
 from singleton import Singleton
 from exception import DTInternalError, DTComError
 from dtglobals import *
-#from dtpll import encodePLL
 
 dtTaskHandlers = dict()
 

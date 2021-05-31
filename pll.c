@@ -1,4 +1,4 @@
-
+#include <stdint.h>
 
 static double gooderr;
 typedef struct pll_set {
@@ -171,13 +171,10 @@ double gooderrin
 
 //pll_num =0  - MAIN PLL, 1 - EMI PLL
 
-
-
-void SetFreq(int pll_num, unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, int auxpow){
-	
+void getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, int auxpow, uint32_t R[])
+{
 	pll_set resset;	
 	pll(setfreq, &resset, 0, 1, 1023, 65535, 23, 4095, 5, 4400, 2200, 50);
-	uint32_t R[6];
 	
 	int divdeg=-1;
 	while(resset.outdiv){
@@ -188,7 +185,7 @@ void SetFreq(int pll_num, unsigned int setfreq, int maino, int auxo, int mltd, i
 	int nm;
 	if(resset.FRAC==0) nm=1;
 	else nm=0;
-	//load reg val
+	// reg val
 	R[0]=(resset.FRAC<<3) + (resset.INT<<15);
 	R[1]=1 + (resset.MOD<<3) + (1<<15);
 	R[2]=2 + (3<<6) + (nm<<8) + (15<<9) + (resset.R<<14) + (1<<24) + (6<<26);
@@ -196,8 +193,4 @@ void SetFreq(int pll_num, unsigned int setfreq, int maino, int auxo, int mltd, i
 	R[4]=4 + (mainpow<<3) + (maino<<5) + (auxpow<<6) + (auxo<<8) + (mltd<<10) + (resset.BandDiv<<12) + (divdeg<<20) + (1<<23);
 	R[5]=5+(1<<22) + (3<<19);
 	
-	//load registers from 5 to 0 to PLL
-
 }
-
-

@@ -1,5 +1,4 @@
 import serial, time
-from collections.abc import Sequence
 from numbers import Integral
 
 from singleton import Singleton
@@ -25,7 +24,7 @@ class DTSerialCom(metaclass=Singleton):
     def timeout(self, to):
         self.port.timeout = to
 
-    def command(self, command: bytes, data=None, nreply: int=0):
+    def command(self, command: bytes, data=None, wordsize: int=2, nreply: int=0):
         """
         Send a binary packet to the device, receive a binary packet from the device and return data as list of integers if any.
         Command format: b'[COMMAND][LEN][DATA]END', where [COMMAND] - command name, [LEN] - [LEN] - length of [DATA], 
@@ -42,19 +41,20 @@ class DTSerialCom(metaclass=Singleton):
 
         raisesource = 'DTSerialCom.command()'
 
+        imask = (1<<wordsize*8)-1
         packet = b'\0' + command
         if isinstance(data, bytes) or isinstance(data, bytearray):
             packet += bytes(data)
         elif isinstance(data, Integral):
             packet += b'\x01\0'
-            packet += int(data&0xffff).to_bytes(2, byteorder='little', signed=False)
-        elif isinstance(data, Sequence) and len(data) > 0 and isinstance(data[0], Integral):
+            packet += int(data&imask).to_bytes(wordsize, byteorder='little', signed=False)
+        elif hasattr(data, '__getitem__') and isinstance(data[0], Integral):
             for n in data:
-                packet += int(n&0xffff).to_bytes(2, byteorder='little', signed=False)
-        elif data is None or isinstance(data, Sequence) and len(data) == 0:
+                packet += int(n&imask).to_bytes(wordsize, byteorder='little', signed=False)
+        elif data is None:
             packet += b'\0\0'
         else:
-            raise DTInternalError(raisesource, 'Sending data type is expected to be bytes, integer or sequence of integers')
+            raise DTInternalError(raisesource, 'Sending data type is expected to be bytes, integer or iterable of integers')
         packet += b'END'
 
         if DEBUG:
