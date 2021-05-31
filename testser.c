@@ -7,11 +7,15 @@
 #include <unistd.h>
 #include <string.h>
 
-char* to_le_bytes(int word)
+char* to_le_bytes(unsigned int word, int size)
 {
-    static char ch[2];
+    static char ch[4];
     ch[0] = word&0xff;
-    ch[1] = (word>>16)&0xff;
+    ch[1] = (word>>8)&0xff;
+    if(size==4) {
+        ch[2] = (word>>16)&0xff;
+        ch[3] = (word>>24)&0xff;
+    }
     return ch;
 }
 
@@ -31,9 +35,9 @@ int main(int argc, char* argv[])
     int fd;
     ssize_t nb;
     int iarg;
-    int nwords;
-    char *twoch, *pos;
-    char cmd[100], buf[101];
+    int nwords, wordsize;
+    char *word, *pos;
+    char cmd[200], buf[201];
 
     if(argc == 1) {
         printf("Usage: %s command [data...]\n", argv[0]);
@@ -49,20 +53,25 @@ int main(int argc, char* argv[])
     }
 
     strcpy(cmd, argv[1]);
-    pos = cmd + strlen(cmd);
+    pos = cmd + strlen(cmd) + 1; //null char will be included also
     nwords = argc - 2;
+    wordsize = 2;
+    for(iarg = 2; iarg < argc; iarg++) {
+        if(atoi(argv[iarg]) > (1<<16)-1)
+            wordsize = 4;
+    }
     if(nwords >= 0) {
-        twoch = to_le_bytes(nwords);
-        strncpy(pos, twoch, 2);
+        word = to_le_bytes(nwords, 2);
+        strncpy(pos, word, 2);
         pos += 2;
     }
     for(iarg = 2; iarg < argc; iarg++) {
-        twoch = to_le_bytes(atoi(argv[iarg]));
-        strncpy(pos, twoch, 2);
-        pos += 2;
+        word = to_le_bytes(atoi(argv[iarg]), wordsize);
+        strncpy(pos, word, wordsize);
+        pos += wordsize;
     }
-    strncpy(pos, "END", 3);
-    pos += 3;
+    strncpy(pos, "END\0", 4);
+    pos += 4;
 
     size_t n = pos-cmd;
 
@@ -81,7 +90,7 @@ int main(int argc, char* argv[])
     printf("Expecting reply... (Ctrl+C to exit)\n");
     fflush(stdout);
 
-    nb = read(fd, buf, 100);
+    nb = read(fd, buf, 200);
 
     if(nb < 0) {
         perror("Reading");
