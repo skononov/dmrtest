@@ -1,14 +1,20 @@
 #!/usr/bin/python3
 
+import sys
 from dtcom import DTSerialCom
 from dtglobals import DEBUG
 
 DEBUG = True
 
-com = DTSerialCom(device='/dev/ttyACM0', timeout=2)
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        command = sys.argv[1].encode('utf-8')
+        data = [int(arg) for arg in sys.argv[2:]]
+        print(data)
+    else:
+        command = b'STATUS'
+        data = None
 
-print('Sending STATUS command')
+    com = DTSerialCom()
 
-reply = com.command(b'STATUS', nreply=1)
-
-print('Received:', reply)
+    com.command(command, odata=data, nreply=-1)

@@ -10,7 +10,7 @@ class DTSerialCom(metaclass=Singleton):
     Class implementing communication between PC and DMR TEST device via [emulated] serial port
     """
 
-    def __init__(self, device='/dev/ttyACM0', timeout=1):
+    def __init__(self, device='/dev/ttyACM0', timeout=3):
         try:
             self.port = serial.Serial(device, timeout=timeout)
         except serial.SerialException as exc:
@@ -59,13 +59,13 @@ class DTSerialCom(metaclass=Singleton):
             packet += (owordsize//2).to_bytes(2, byteorder='little')
             # DATA as LE-bytes
             packet += int(odata&imask).to_bytes(owordsize, byteorder='little', signed=False)
-        elif hasattr(odata, '__getitem__') and hasattr(odata, '__len__') and isinstance(odata[0], Integral):
+        elif hasattr(odata, '__getitem__') and hasattr(odata, '__len__') and len(odata)>0 and isinstance(odata[0], Integral):
             # LEN in words
             packet += (owordsize//2*len(odata)).to_bytes(2, byteorder='little')
             # DATA as LE-bytes
             for n in odata:
                 packet += int(n&imask).to_bytes(owordsize, byteorder='little', signed=False)
-        elif odata is None:
+        elif odata is None or hasattr(odata, '__len__') and len(odata)==0:
             packet += b'\0\0'
         else:
             raise DTInternalError(raisesource, 'Sending data type is expected to be bytes, integer or iterable of integers')
@@ -74,7 +74,7 @@ class DTSerialCom(metaclass=Singleton):
         packet += b'END\0'
 
         if DEBUG:
-            print(f'DTSerialCom.command(): sending: {packet}')
+            print(f'{raisesource}: sending {packet}')
 
         # Flush all buffers before communication
         self.port.reset_input_buffer()
@@ -86,16 +86,23 @@ class DTSerialCom(metaclass=Singleton):
             raise DTComError(raisesource, 'Write to serial port failed') from exc
 
         if DEBUG:
-            print(f'DTSerialCom.command(): {nw} bytes written to port')
+            print(f'{raisesource}: {nw} bytes written to port')
 
         # Read ACK
         try:
+            if DEBUG:
+                print(f'{raisesource}: reading 4 bytes with timeout {self.port.timeout}s')
             ack = self.port.read(4)
         except serial.SerialException as exc:
             raise DTComError(raisesource, 'Read from serial port failed') from exc
 
-        if ack != b'ACK\0':
-            raise DTComError(raisesource, f'"ACK" was not received before timeout ({self.port.timeout}s) expired.')
+        if DEBUG:
+            print(f'{raisesource}: {ack} is read')
+
+        if ack == b'':
+            raise DTComError(raisesource, f'Empty answer or timeout {self.port.timeout}s expired.')
+        elif ack != b'ACK\0':
+            raise DTComError(raisesource, f'b"ACK\\0" is expected while "{ack}" was received')
         
         if nreply == 0:
             return list()
@@ -104,21 +111,26 @@ class DTSerialCom(metaclass=Singleton):
         try:
             if nreply > 0:
                 # await 2*nreply bytes plus number of transmitted words (2 bytes) and 'END\0' directive (4 bytes)
-                response: bytes = self.port.read(2*nreply+6)
+                nbexpect = 2*nreply+6
+                if DEBUG:
+                    print(f'{raisesource}: reading {nbexpect} bytes')
+                response: bytes = self.port.read(nbexpect)
             else:
+                if DEBUG:
+                    print(f'{raisesource}: reading until b"END\\0" arrives')
                 response: bytes = self.port.read_until(b'END\0')
         except serial.SerialException as exc:
             raise DTComError(raisesource, 'Read from serial port failed') from exc
 
         if DEBUG:
-            print(f'DTSerialCom.command(): received: {response}')
+            print(f'{raisesource}: received: {response}')
 
         rdata = list()
 
         if len(response) == 0:
             raise DTComError(raisesource, 'No response from the device')
         elif response[-4:] != b'END\0':
-            print('DTSerialCom.command(): "END" was not received from the device.')
+            print('{raisesource}: b"END\\0" was not received from the device.')
         elif nreply > 0 and len(response) != 2*nreply+6:
             raise DTComError(raisesource, f'Byte-length of the reply ({len(response)}) differs from expected one ({2*nreply+6})')
         else:
