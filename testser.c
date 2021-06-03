@@ -1,17 +1,30 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <poll.h>
 #include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 
-static FILE* fs; //file stream
+#define _POSIX_C_SOURCE 200809L
+
+#define ACK "ACK"
+#define END "END"
+
+static FILE* fs; //device file stream
+static int fd; //device file descriptor
 
 void closefs() {
     fclose(fs);
+}
+
+void closefd() {
+    close(fd);
 }
 
 char* append_int(char* buf, unsigned int word, size_t size)
@@ -54,8 +67,8 @@ void print_bytes(const char *buf, size_t n)
 const char* strpollflags(int revents) 
 {
     static char str[200];
-    static const char* sflags[] = {"POLLERR", "POLLHUP", "POLLNVAL", "POLLPRI"};
-    static const int flags[] = {POLLERR, POLLHUP, POLLNVAL, POLLPRI};
+    static const char* sflags[] = {"POLLIN", "POLLERR", "POLLHUP", "POLLNVAL", "POLLPRI"};
+    static const int flags[] = {POLLIN, POLLERR, POLLHUP, POLLNVAL, POLLPRI};
 
     str[0] = 0;
     for(int i=0; i<4; i++) {
@@ -95,16 +108,64 @@ ssize_t fpollread(FILE* f, int timeout, char* buf, size_t size)
     return 0;
 }
 
+// Read serial device until END is received or size characters (whatever earlier)
+ssize_t pollread(int fd, int timeout, char* buf, size_t size) 
+{
+    static const ssize_t lenend = 3;
+
+    struct pollfd pfd = {fd, POLLIN, 0};
+    ssize_t ntotb = 0, nb;
+    const int chunksize = 3;
+    int ntry, endread = 0;
+
+
+    while (ntotb < size) {
+        int rp = poll(&pfd, 1, timeout);
+        //fprintf(stderr, "Received poll flags: %s\n", strpollflags(pfd.revents));
+
+        if (rp > 0) {
+            ntry = (chunksize<size-ntotb)?chunksize:size-ntotb;
+            nb = read(fd, buf+ntotb, ntry);
+            if (nb < 0) {
+                perror("Reading device");
+                break;
+            } else if (nb == 0) {
+                errno = ECOMM;
+                perror("Zero character read while poll returned that input data available");
+                break;
+            }
+            ntotb += nb;
+
+            if (ntotb>=lenend && strncmp(buf+ntotb-lenend, END, lenend) == 0) {
+                endread = 1;
+                break;
+            }
+        } else if (rp < 0) {
+            perror("Polling available data");
+            return -1;
+        } else { // timeout
+            break;
+        }
+    }
+
+    if (ntotb > 0) {
+        printf("%ld bytes received: ", ntotb);
+        print_bytes(buf, ntotb);
+        if (!endread)
+            fprintf(stderr, "%s is not received\n", END);
+    } else
+        printf("No data received\n");
+
+    return ntotb;
+}
 
 int main(int argc, char* argv[]) 
 {
-    size_t nb;
+    ssize_t nb;
     int iarg;
     int nwords, len, lenexp;
     char *pos;
     char cmd[256], buf[256];
-
-    const char *ACK = "ACK", *END = "END";
 
     if (argc == 1) {
         printf("Usage: %s command [data...]\n", argv[0]);
@@ -112,16 +173,23 @@ int main(int argc, char* argv[])
     }
 
     const char* devfn = "/dev/ttyACM0";
-    fs = fopen(devfn, "r+b");
+    fd = open(devfn, O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
 
-    fflush(fs);
-
-    if (fs == NULL) {
+    if (fd < 0) {
         perror(devfn);
         return -1;
     }
 
-    atexit(closefs);
+    atexit(closefd);
+
+    int iocmbits = 0;
+    ioctl(fd, TIOCMGET, &iocmbits);
+    printf("TIOCMGET: %hd\n", iocmbits);
+    iocmbits = TIOCM_DTR|TIOCM_RTS;
+    ioctl(fd, TIOCMBIS, &iocmbits);
+
+    ioctl(fd, TCFLSH, TCIFLUSH);
+    ioctl(fd, TCFLSH, TCOFLUSH);
 
     cmd[0] = 0;
     len = strlen(argv[1]);
@@ -149,12 +217,12 @@ int main(int argc, char* argv[])
 
     size_t n = pos-cmd;
 
-    printf("Sending command of %lu bytes: ", n);
+    printf("Sending command of %ld bytes: ", n);
     print_bytes(cmd, n);
 
-    nb = fwrite(cmd, 1, n, fs);
+    nb = write(fd, cmd, n);
     
-    if (ferror(fs)) {
+    if (nb < 0) {
         perror("Writing");
         return -2;
     }
@@ -163,23 +231,20 @@ int main(int argc, char* argv[])
 
     printf("Expecting reply... (Ctrl+C to exit)\n");
 
-    //nb = fpollread(fs, 3000, buf, 256);
-    nb = fread(buf, 1, 256, fs);
-    printf("%lu bytes received: ", nb);
-    print_bytes(buf, nb);
+    nb = pollread(fd, 3000, buf, 256);
+    
+    if (nb < 0)
+        return -2;
 
     if (nb < strlen(ACK) || strncmp(buf, ACK, strlen(ACK)) != 0)
         fputs("ACK is not received\n", stderr);
-
-    if (nb < strlen(END) || strncmp(&buf[nb-strlen(END)], END, strlen(END)) != 0)
-        fputs("END is not received\n", stderr);
 
     if (nb == 0)
         return 0;
 
     len = from_le_bytes_to_uint(buf+strlen(ACK), 2);
 
-    lenexp = (nb-strlen(ACK)-strlen(END))/2;
+    lenexp = (nb-strlen(ACK)-strlen(END)-2)/2;
 
     if (len != lenexp)
         fprintf(stderr, "Length read (%d) does not match received data length (%d)\n", len, lenexp);
