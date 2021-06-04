@@ -75,11 +75,17 @@ class DTSerialCom(metaclass=Singleton):
                     raise DTInternalError(raisesource, 'Output word size must be 2 or 4.')
                 owordsize = [owordsize]*len(odata)
             elif isinstance(owordsize, list) or isinstance(owordsize, tuple):
-                if len(owordsize) != len(odata):
-                    raise DTInternalError(raisesource, 'Output word size list must be the same length as data length.')
-                elif set(list(owordsize)+[2,4]) != {2, 4}:
-                    print(owordsize, set(owordsize))
-                    raise DTInternalError(raisesource, 'Output word size list must contain only 2 and 4.')
+                owordsize = list(owordsize)
+                lenwsize = len(owordsize)
+                lendata = len(odata)
+                if lenwsize == 0:
+                    raise DTInternalError(raisesource, 'Output word size list must not be empty and contain only 2 or 4.')
+                elif set(owordsize+[2,4]) != {2, 4}:
+                    raise DTInternalError(raisesource, 'Output word size list must contain only 2 or 4.')
+                elif lenwsize < lendata:
+                    owordsize.extend([owordsize[-1]]*(lendata-lenwsize)) # extend word sizes with the last value
+                elif lenwsize > lendata:
+                    owordsize = owordsize[:lendata]
             elif not isinstance(owordsize, list) and not isinstance(owordsize, tuple) and not isinstance(owordsize, Integral):
                 raise DTInternalError(raisesource, 'Output word size must be scalar or list of 2 and 4.')
 

@@ -1,37 +1,46 @@
 #!/usr/bin/python3
 
-import sys
 from dtcom import DTSerialCom
+import argparse
 
-if __name__ == "__main__":
-    if '-v' in sys.argv:
-        DTSerialCom.DEBUG = True
-        sys.argv.remove('-v')
+parser = argparse.ArgumentParser(description='Communicate with a DMR TEST device.')
+parser.add_argument('command', type=str, 
+                    help='command to send')
+parser.add_argument('data', metavar='dataword', type=int, nargs='*',
+                    help='integer data words to send', default=[])
+parser.add_argument('-v', '--verbose', action='store_true',
+                    help='verbose print-out')
+parser.add_argument('-e', '--expect', metavar='N', type=int,
+                    help='expected number of 2-byte words in reply', default=-1)
+parser.add_argument('-s', metavar='2|4', type=int, nargs='+',
+                    help='integer or whitespace separated list of output word sizes; place it after data words', default=2)
 
-    if len(sys.argv) > 1:
-        command = sys.argv[1].encode('utf-8')
-        data = [int(arg) for arg in sys.argv[2:]]
-    else:
-        print(f"Usage: {sys.argv[0]} [-v] command [data...]")
-        exit(0)
+args = parser.parse_args()
+#print(args)
 
-    com = DTSerialCom()
+DTSerialCom.DEBUG = args.verbose
 
-    if command == b'LOAD PLL':
-        assert(len(data)==7)
-        owordsize = [2] + 6*[4]
-    elif command == b'SET PLLFREQ':
-        assert(len(data)==1)
-        print(f"Setting frequency to PLL and wait for lock...")
-        isset, foffset = com.set_pll_freq(data[0])
-        print(f'Frequency is{"" if isset else " not"} set.' + (f'FOFFSET={foffset}' if isset else ''))
-        exit(0)
-    else:
-        owordsize = 2
+com = DTSerialCom()
 
-    print(f"Call:", command.decode(), *data)
-    reply = com.command(command, odata=data, owordsize=owordsize, nreply=-1)
-    if reply != []:
-        print(f"Reply:", *reply)
-    else:
-        print(f"Empty reply")
+if args.command == 'LOAD PLL':
+    if len(args.data)!=7:
+        print(f'"LOAD PLL" should be supplied with 7 integers')
+        exit(1)
+    owordsize = [2] + 6*[4]
+elif args.command == 'SET PLLFREQ':
+    if len(args.data)!=1:
+        print(f'"SET PLLFREQ" should be supplied with 1 integers')
+        exit(1)
+    print(f"Setting frequency to PLL and wait for lock...")
+    isset, foffset = com.set_pll_freq(args.data[0])
+    print(f'Frequency is{"" if isset else " not"} set.' + (f'FOFFSET={foffset}' if isset else ''))
+    exit(0)
+else:
+    owordsize = args.s
+
+print(f"Call:", args.command, *args.data)
+reply = com.command(args.command.encode(), odata=args.data, owordsize=owordsize, nreply=args.expect)
+if reply != []:
+    print(f"Reply:", *reply)
+else:
+    print(f"Empty reply")
