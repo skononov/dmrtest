@@ -4,10 +4,6 @@ from time import time
 
 _libdmr = cdll.LoadLibrary("./libdmr.so")
 
-def _init_ctypes_array(ctype, size: int, value: int = 0):
-    array_ctype = ctype*size
-    return array_ctype(*[value]*size)
-
 def get_pll_regs(freq: int):
     # init ctypes uint array with nulls
     regs = (c_uint*6)(*[0]*6)
@@ -16,8 +12,9 @@ def get_pll_regs(freq: int):
     return regs
 
 if __name__ == "__main__":
+    # Testing pll calc code
     rng = default_rng(int(time()*100))
-    rndfreqs = rng.integers(100000, 500000, 10)
+    rndfreqs = rng.integers(137000000, 800000000, 20)
     for freq in rndfreqs:
         regs = get_pll_regs(freq)
         print(f'Registers for input frequency {freq}: {regs}')
