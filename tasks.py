@@ -6,6 +6,7 @@ from dtcom import DTSerialCom
 from singleton import Singleton
 from exception import DTInternalError, DTComError
 from dtglobals import *
+import dtglobals as dtg # for dtg.LANG
 
 dtTaskTypes = None
 
@@ -73,7 +74,7 @@ class DTTask:
             # TODO: should the message be set?
             if self.message:
                 self.message += '\n'
-            self.message += pardata[LANG] + (' вне диапазона' if LANG == 'ru' else ' out of range')
+            self.message += pardata[dtg.LANG] + (' вне диапазона' if dtg.LANG == 'ru' else ' out of range')
             return False
         
         return True
@@ -89,15 +90,15 @@ class DTTask:
     @classmethod
     def _decodeStatus(cls, status_word: int):
         desc = ''
-        for i in range(len(cls.statusBitDescription[LANG])):
+        for i in range(len(cls.statusBitDescription[dtg.LANG])):
             if status_word&(1<<i) != 0:
-                desc += ('\n' if i>0 else '') + cls.statusBitDescription[LANG][i]
+                desc += ('\n' if i>0 else '') + cls.statusBitDescription[dtg.LANG][i]
         return desc
 
     def _set_success(self):
         self.failed = False
         self.completed = True
-        self.message = 'Успешно' if LANG == 'ru' else 'Success'
+        self.message = 'Успешно' if dtg.LANG == 'ru' else 'Success'
 
     def _set_error(self, message: str, prependmsg = True):
         self.failed = True
@@ -110,22 +111,22 @@ class DTTask:
     def _set_eval_error(self):
         self.failed = True
         self.completed = False
-        self.message = 'Ошибка вычисления' if LANG == 'ru' else 'Evaluation error'
+        self.message = 'Ошибка вычисления' if dtg.LANG == 'ru' else 'Evaluation error'
 
     def _set_com_error(self, exc: DTComError):
         self.failed = True
         self.completed = False
-        self.message = ('Ошибка связи с устройством:\n' if LANG == 'ru' else 'Communication error:\n') + exc
+        self.message = ('Ошибка связи с устройством:\n' if dtg.LANG == 'ru' else 'Communication error:\n') + exc
 
     def _set_status_error(self, status: int):
         self.failed = True
         self.completed = False
-        self.message = ('Ошибка статуса:\n' if LANG == 'ru' else 'Status error:\n') + self._decodeStatus(status&0x23)
+        self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') + self._decodeStatus(status&0x23)
 
     def _set_pll_error(self):
         self.failed = True
         self.completed = False
-        self.message = 'Ошибка PLL демодулятора' if LANG=='ru' else 'Demodulator PLL error'
+        self.message = 'Ошибка PLL демодулятора' if dtg.LANG=='ru' else 'Demodulator PLL error'
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
@@ -238,7 +239,7 @@ class DTMeasureInputFrequency(DTTask):
 
         evalfreq = self._eval_freq()
         if evalfreq is None:
-            self._set_error('Ошибка вычисления' if LANG=='ru' else 'Evaluation error')    
+            self._set_error('Ошибка вычисления' if dtg.LANG=='ru' else 'Evaluation error')    
             return self
 
         self.results['FREQUENCY'] = evalfreq - self.parameters['FREQUENCY OFFSET'] - foffset
@@ -287,8 +288,10 @@ class DTMeasureNonlinearity(DTTask):
             self._set_com_error(exc)
             return self
 
+        mfcode = self.parameters['MODFREQUENCY']*120*kHz/(1<<16)
+
         try:
-            self.com.command(b'SET LFDAC', [], owordsize=[2, 4])
+            self.com.command(b'SET LFDAC', [self.parameters['MODAMP'], mfcode], owordsize=[2, 4])
             # reading ADC data
             self.buffer = self.com.command(b'GET ADC DAT', [1, self.parameters['DATANUM']])
         except DTComError as exc:

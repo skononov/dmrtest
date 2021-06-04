@@ -3,7 +3,7 @@ from numbers import Integral
 
 from singleton import Singleton
 from exception import DTInternalError, DTComError
-from dtglobals import DEBUG
+import dtglobals as dtg
 from c_api import get_pll_regs
 
 _END = b'END'
@@ -15,6 +15,8 @@ class DTSerialCom(metaclass=Singleton):
     """
     Class implementing communication between PC and DMR TEST device via [emulated] serial port
     """
+
+    DEBUG = False
 
     def __init__(self, device='/dev/ttyACM0', timeout=3):
         try:
@@ -47,7 +49,8 @@ class DTSerialCom(metaclass=Singleton):
             nreply    - number of data words in the reply. 0 - if no reply besides 'ACK' is expected. 
                         If nreply<0, then read all data available.
         """
-        global DEBUG, _END, _lenEND, _ACK, _lenACK
+        global _END, _lenEND, _ACK, _lenACK
+        DEBUG = DTSerialCom.DEBUG
 
         raisesource = 'DTSerialCom.command()'
         
@@ -108,31 +111,12 @@ class DTSerialCom(metaclass=Singleton):
         if DEBUG:
             print(f'{raisesource}: {nw} bytes written to port')
 
-        # Read ACK
-        try:
-            if DEBUG:
-                print(f'{raisesource}: reading 3 bytes with timeout {self.port.timeout}s')
-            rack = self.port.read(_lenACK)
-        except serial.SerialException as exc:
-            raise DTComError(raisesource, 'Read from serial port failed') from exc
-
-        if DEBUG:
-            print(f'{raisesource}: {rack} is read')
-
-        if rack == b'':
-            raise DTComError(raisesource, f'Empty answer or timeout {self.port.timeout}s expired.')
-        elif rack != _ACK:
-            raise DTComError(raisesource, f'{_ACK} is expected while {rack} was read')
-        
-        if nreply == 0:
-            return list()
-
         # Read reply from the device
         try:
             nbexpect = 0
             if nreply > 0:
                 # await 2*nreply bytes plus number of transmitted words (2 bytes) and END directive
-                nbexpect = 2*nreply+2+_lenEND
+                nbexpect = 2*nreply+2+_lenACK+_lenEND
                 if DEBUG:
                     print(f'{raisesource}: reading {nbexpect} bytes')
                 response: bytes = self.port.read(nbexpect)
@@ -146,16 +130,21 @@ class DTSerialCom(metaclass=Singleton):
         if DEBUG:
             print(f'{raisesource}: received: {response}')
 
+        if response == b'':
+            raise DTComError(raisesource, f'Empty answer or timeout {self.port.timeout}s expired.')
+
         rdata = list()
 
         if len(response) == 0:
             raise DTComError(raisesource, 'No response from the device')
+        elif response[:_lenACK] != _ACK:
+            raise DTComError(raisesource, f'{_ACK} was not received')
         elif response[-_lenEND:] != _END:
-            print(f'{raisesource}: {_END} was not received from the device.')
+            raise DTComError(raisesource, f'{_END} was not received')
         elif nreply > 0 and len(response) != nbexpect:
-            raise DTComError(raisesource, f'Byte-length of the reply ({len(response)}) differs from expected one ({2*nreply+6})')
+            raise DTComError(raisesource, f'Byte-length of the reply ({len(response)}) differs from expected one ({nbexpect})')
         else:
-            response = response[:-_lenEND] # omit 'END'
+            response = response[_lenACK:-_lenEND] # omit ACK & END'
             length = int.from_bytes(response[:2], byteorder='little', signed=False)
             if length != (len(response)-2)/2:
                 raise DTComError(raisesource, f'Length of the reply ({(len(response)-2)/2}) in words differs from length read ({length})')
