@@ -48,7 +48,7 @@ unsigned int from_le_bytes_to_uint(const char* bytes, size_t size)
     size = size<=sizeof(int)?size:sizeof(int);
 
     for(size_t i=0; i<size; i++)
-        u |= (bytes[i]>>8*i) & 0xff;
+        u += (bytes[i]&0xff)<<(8*i);
     
     return u;
 }
@@ -59,7 +59,7 @@ void print_bytes(const char *buf, size_t n)
         if (isprint((int)*ch))
             printf("%c", *ch);
         else
-            printf("\\x%02X", *ch);
+            printf("\\x%02hhX", *ch);
     }
     puts("");
 }
@@ -85,27 +85,6 @@ const char* strpollflags(int revents)
         strcpy(str, "(none)");
 
     return str;
-}
-
-ssize_t fpollread(FILE* f, int timeout, char* buf, size_t size) 
-{
-    struct pollfd pfd = {fileno(f), POLLIN, 0};
-
-    int rp = poll(&pfd, 1, timeout);
-    fprintf(stderr, "Received poll flags: %s\n", strpollflags(pfd.revents));
-
-    if (rp > 0) {
-        size_t nb = fread(buf, 1, size, f);
-        printf("%lu bytes received: ", nb);
-        print_bytes(buf, nb);
-        return nb;
-    } else if (rp < 0) {
-        perror("Polling available data");
-        return -1;
-    }
-
-    printf("No data received for %.1f sec\n", (float)timeout/1000);
-    return 0;
 }
 
 // Read serial device until END is received or size characters (whatever earlier)
@@ -165,7 +144,8 @@ int main(int argc, char* argv[])
     int iarg;
     int nwords, len, lenexp;
     char *pos;
-    char cmd[256], buf[256];
+    const size_t lenbuf = 32768+8;
+    char cmd[256], buf[lenbuf];
 
     if (argc == 1) {
         printf("Usage: %s command [data...]\n", argv[0]);
@@ -227,27 +207,28 @@ int main(int argc, char* argv[])
         return -2;
     }
 
+    ioctl(fd, TCFLSH, TCOFLUSH);
+
     printf("%ld bytes written\n", nb);
 
     printf("Expecting reply... (Ctrl+C to exit)\n");
 
-    nb = pollread(fd, 3000, buf, 256);
+    nb = pollread(fd, 3000, buf, lenbuf);
     
     if (nb < 0)
         return -2;
-
+    else if (nb == 0)
+        return 0;
+    
     if (nb < strlen(ACK) || strncmp(buf, ACK, strlen(ACK)) != 0)
         fputs("ACK is not received\n", stderr);
-
-    if (nb == 0)
-        return 0;
 
     len = from_le_bytes_to_uint(buf+strlen(ACK), 2);
 
     lenexp = (nb-strlen(ACK)-strlen(END)-2)/2;
 
     if (len != lenexp)
-        fprintf(stderr, "Length read (%d) does not match received data length (%d)\n", len, lenexp);
+        fprintf(stderr, "Length sent by device (%d) does not match received data length (%d)\n", len, lenexp);
 
     return 0;
 }
