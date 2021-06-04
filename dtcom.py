@@ -4,6 +4,7 @@ from numbers import Integral
 from singleton import Singleton
 from exception import DTInternalError, DTComError
 from dtglobals import DEBUG
+from c_api import get_pll_regs
 
 _END = b'END'
 _lenEND = len(_END)
@@ -173,6 +174,15 @@ class DTSerialCom(metaclass=Singleton):
             if timeout!=0 and time.time()-start > timeout:
                 return (False, resp[0] if len(resp)>0 else None)
             time.sleep(0.2)
+
+    def set_pll_freq(self, frequency: int):
+        for foff in (0, -5, 5):
+            regs = get_pll_regs(frequency+foff)
+            self.command(b'LOAD PLL', [2, *regs], owordsize=[2]+6*[4])
+            isset, _status = self.wait_status(1<<3, timeout=2)
+            if isset:
+                return isset, foff
+        return False, 0
 
     def __del__(self):
         if hasattr(self, 'port') and self.port.isOpen:
