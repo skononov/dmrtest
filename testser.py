@@ -19,6 +19,11 @@ if __name__ == "__main__":
     if command == b'LOAD PLL':
         assert(len(data)==7)
         owordsize = [2] + 6*[4]
+    elif command == b'SET PLLFREQ':
+        assert(len(data)==1)
+        isset, foffset = com.set_pll_freq(data[0])
+        print(f'Frequency is set: {isset}. FOFFSET={foffset}.')
+        exit(0)
     else:
         owordsize = 2
 
