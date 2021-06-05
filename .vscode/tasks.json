@@ -4,7 +4,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build program",
+            "label": "Build DMR library",
             "type": "shell",
             "command": "make",
             "problemMatcher": [],
@@ -12,6 +12,26 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "type": "cppbuild",
+            "label": "C/C++: gcc сборка активного файла",
+            "command": "/usr/bin/gcc",
+            "args": [
+                "-g",
+                "-c",
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}.o"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "компилятор: /usr/bin/gcc"
         }
     ]
 }
