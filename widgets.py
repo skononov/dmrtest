@@ -12,7 +12,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from config import DTConfiguration
 from tasks import dtTaskTypes, dtTaskInit
 from singleton import Singleton
-from dtglobals import DEBUG, LANG
+from dtglobals import *
+import dtglobals as dtg
 #import dialogs as dlg
 
 
@@ -154,14 +155,12 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         csmb = self.chooseScenarioMB = tk.Menubutton(self.menuFrame, text='Запустить сценарий')
         csmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
         csmb.grid(row=0)
-        csmb.menu = DTChooseScenarioMenu(self.chooseScenarioMB)
-        csmb['menu'] = csmb.menu
+        csmb['menu'] = csmb.menu = DTChooseScenarioMenu(self.chooseScenarioMB)
         csmb.focus()
 
         cmmb = self.chooseTaskMB = tk.Menubutton(self.menuFrame, text='Выбрать измерение')
         cmmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
-        cmmb.menu = DTChooseTaskMenu(cmmb, self.runTask)
-        cmmb['menu'] = cmmb.menu
+        cmmb['menu'] = cmmb.menu = DTChooseTaskMenu(cmmb, self.runTask)
         cmmb.grid(row=1)
 
         csb = self.newScenarioMB = tk.Button(self.menuFrame, text='Создать сценарий', command=self.newScenario)
@@ -227,10 +226,9 @@ class DTNewScenarioDialog(tk.Tk):
         self.tasklist = tk.Listbox(frame, height=7, width=40)
         self.tasklist.grid(column=1, row=1, sticky=tk.NW)
 
-        addbtn = tk.Menubutton(frame, text='Добавить задачу')
-        addbtn.menu = DTChooseTaskMenu(addbtn, command=self.addTask)
-        addbtn['menu'] = addbtn.menu
-        addbtn.grid(column=2, row=2, sticky=tk.N)
+        self.addtaskbtn = tk.Menubutton(frame, text='Добавить задачу')
+        self.addtaskbtn['menu'] = self.addtaskbtn = DTChooseTaskMenu(self.addtaskbtn, command=self.addTask)
+        self.addtaskbtn.grid(column=2, row=2, sticky=tk.N)
 
         tk.Button(frame, text='Создать', command=self.create).grid(column=1, row=2, sticky=tk.S)
     
@@ -238,9 +236,7 @@ class DTNewScenarioDialog(tk.Tk):
         pass
 
     def addTask(self):
-        self.tasklist.insert(i, task.name[LANG])
-
-
+        self.tasklist.insert(i, task.name[dtg.LANG])
         
 
 class DTTaskFrame(tk.Frame):
@@ -276,7 +272,7 @@ class DTTaskFrame(tk.Frame):
         cmmb = self.chooseMeasurementMB = tk.Menubutton(master=menuFrame, text='Запустить измерение')
         cmmb.configure(relief=tk.RAISED, width=23, height=2, padx=5, pady=0, takefocus=tk.YES)
         cmmb.grid(row=1)
-        cmmb.menu = DTChooseMeasurementMenu(self.chooseMeasurementMB)
+        cmmb.menu = DTChooseTaskMenu(self.chooseMeasurementMB)
         cmmb['menu'] = cmmb.menu
 
         csb = self.newScenarioMB = tk.Button(master=menuFrame, text='Создать сценарий', command=self.newScenario)
@@ -309,5 +305,5 @@ class DTChooseTaskMenu(tk.Menu):
         super().__init__(menubutton, tearoff = 0)
 
         for tasktype in dtTaskTypes:
-            self.add_command(label=tasktype.name[LANG], command=command)
+            self.add_command(label=tasktype.name[dtg.LANG], command=command)
 

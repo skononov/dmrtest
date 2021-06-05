@@ -19,13 +19,13 @@ class DTTask:
     # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
     parameterData = {
         'ATT': {'ru': 'Затухание', 'en': 'Attenuation', 'lowlim': 0, 'uplim': 63, 'dunit': ('dB', 1)},
-        'AVENUM': {'ru': 'Точек усреднения мощности', 'en': 'Power averaging points', 'lowlim': 1, 'uplim': 4096},
+        'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'lowlim': 1, 'uplim': 4096},
         'DATANUM': {'ru': 'Точек АЦП', 'en': 'ADC points', 'lowlim': 16, 'uplim': 16384},
         'FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'lowlim': 137*MHz, 'uplim': 800*MHz, 'dunit': ('MHz', MHz)},
         'FREQUENCY OFFSET': {'ru': 'Сдвиг частоты', 'en': 'Frequency offset', 'lowlim': -10*kHz, 'uplim': 10*kHz, 'dunit': ('kHz', kHz)},
         'MODFREQUENCY': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'lowlim': 1, 'uplim': 100*kHz, 'dunit': ('kHz', kHz)},
         'MODAMP': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'lowlim': 0, 'uplim': 0xFFFF},
-        'BNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'lowlim': 100, 'uplim': 2000},
+        'BITNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'lowlim': 100, 'uplim': 2000},
         'RANGE': {'ru': 'Диапазон НЧ АЦП', 'en': 'Range of LF ADC', 'lowlim': 0, 'uplim': 15}
     }
 
@@ -59,9 +59,13 @@ class DTTask:
         self.failed = False # if last task call is failed
         self.completed = False # if task is successfully completed
 
-    def __call__(self):
-        """ This method should be implemented in children classes so that task is performed when obj() is called.
-            Should return the task object.
+    def init_device(self):
+        """ This method should be implemented to initialise the device for the task.
+        """
+        return self
+
+    def measure(self):
+        """ This method should be implemented to perform one measurement. Should return self.
         """
         return self
 
@@ -70,8 +74,9 @@ class DTTask:
             raise DTInternalError(self.__class__.__name__+'.check_parameter', f'Unknown parameter "{par}"')
         
         pardata = DTTask.parameterData[par]
-        if self.parameters[par] > pardata['uplim'] or self.parameters[par] < pardata['lowlim']:
-            # TODO: should the message be set?
+        if not isinstance(self.parameters[par], int):
+            raise DTInternalError(self.__class__.__name__+'.check_parameter', f'Parameter "{par}" must be integer')
+        elif self.parameters[par] > pardata['uplim'] or self.parameters[par] < pardata['lowlim']:
             if self.message:
                 self.message += '\n'
             self.message += pardata[dtg.LANG] + (' вне диапазона' if dtg.LANG == 'ru' else ' out of range')
@@ -141,12 +146,8 @@ class DTCalibrate(DTTask):
     def __init__(self):
         super().__init__()
 
-    def __call__(self):
+    def init_device(self):
         self.failed = self.completed = False
-        if not self.check_all_parameters():
-            self._set_error('')
-            return self
-
         try:
             self.com.command(b'SET MEASST', 1)
             self.com.command(b'SET DCCOMP', 1)
@@ -159,11 +160,14 @@ class DTCalibrate(DTTask):
             self._set_com_error(exc)
             return self
 
-        if status&0x23 > 0:
+        if status&0x3 > 0:
             self._set_status_error(status)
             return self
 
         self._set_success()
+        return self
+
+    def measure(self):
         return self
 
 
@@ -173,12 +177,12 @@ class DTMeasurePower(DTTask):
     """
     name = dict(ru='Измерение входной/выходной мощности', en='Measuring input&output power')
 
-    def __init__(self, avenum: int = 1, att: int = 0):
+    def __init__(self, avenum: int = 64, att: int = 20):
         super().__init__()
-        self.parameters['AVENUM'] = int(min(avenum, 2**32-1))
+        self.parameters['AVENUM'] = avenum
         self.parameters['ATT'] = att
 
-    def __call__(self):
+    def init_device(self):
         self.failed = self.completed = False
         if not self.check_all_parameters():
             self._set_error('')
@@ -191,13 +195,23 @@ class DTMeasurePower(DTTask):
             self._set_com_error(exc)
             return self
 
-        pwrs = self.com.command(b'GET PWR', self.parameters['AVENUM'], nreply=2)
+        return self
+
+    def measure(self):
+        self.failed = self.completed = False
+        
+        try:
+            pwrs = self.com.command(b'GET PWR', self.parameters['AVENUM'], nreply=2)
+        except DTComError as exc:
+            self._set_com_error(exc)
+            return self
 
         self.results['OUTPUT POWER'] = pwrs[0]
         self.results['INPUT POWER'] = pwrs[1]
 
         self._set_success()
         return self
+
 
 class DTMeasureInputFrequency(DTTask):
     """
@@ -212,8 +226,8 @@ class DTMeasureInputFrequency(DTTask):
         self.parameters['DATANUM'] = bufsize
         self.buffer = None
 
-    def __call__(self):
-        self.failed = self.completed = False
+    def init_device(self):
+        self.failed = False
         if not self.check_all_parameters():
             self._set_error('')
             return self
@@ -226,11 +240,7 @@ class DTMeasureInputFrequency(DTTask):
             if not isset:
                 self._set_pll_error()
                 return self
-        except DTComError as exc:
-            self._set_com_error(exc)
-            return self
 
-        try:
             # reading ADC data
             self.buffer = self.com.command(b'GET ADC DAT', [1, self.parameters['DATANUM']])
         except DTComError as exc:
@@ -278,22 +288,19 @@ class DTMeasureNonlinearity(DTTask):
             return self
         
         foffset = 0
+        mfcode = int(self.parameters['MODFREQUENCY']*120*kHz/(1<<16)+0.5)
+
         try:
             self.com.command(b'SET MEASST', 2)
             isset, foffset = self.com.set_pll_freq(self.parameters['FREQUENCY'])
             if not isset:
                 self._set_pll_error()
                 return self
-        except DTComError as exc:
-            self._set_com_error(exc)
-            return self
-
-        mfcode = self.parameters['MODFREQUENCY']*120*kHz/(1<<16)
-
-        try:
+    
             self.com.command(b'SET LFDAC', [self.parameters['MODAMP'], mfcode], owordsize=[2, 4])
             # reading ADC data
-            self.buffer = self.com.command(b'GET ADC DAT', [1, self.parameters['DATANUM']])
+            datanum = self.parameters['DATANUM']
+            self.buffer = self.com.command(b'GET ADC DAT', [1, datanum], nreply=datanum)
         except DTComError as exc:
             self._set_com_error(exc)
             return self
@@ -323,13 +330,14 @@ class DTMeasureNonlinearity(DTTask):
 
 class DTDMRInput(DTTask):
     """
-    DMR analysis
+    DMR input analysis
     """
     name = dict(ru='Вход ЦР', en='DMR Input')
 
-    def __init__(self, frequency: int = 200*MHz):
+    def __init__(self, frequency: int = 200*MHz, bitnum: int = 1000):
         super().__init__()
         self.parameters['FREQUENCY'] = frequency
+        self.parameters['BITNUM'] = bitnum
 
     def __call__(self):
         self.failed = self.completed = False
@@ -349,12 +357,16 @@ class DTDMRInput(DTTask):
             return self
 
         try:
-            self.com.command(b'SET LFDAC', [], owordsize=[2, 4])
-            # reading ADC data
-            self.buffer = self.com.command(b'GET ADC DAT', [1, self.parameters['DATANUM']])
+            nerrbits = self.com.command(b'GET BITERR', self.parameters['BITNUM'], nreply=1)[0]
+
+            self.buffer = list()
+            for dibit in range(4):
+                self.buffer.append(self.com.command(b'GET DMRDIBIT', dibit, nreply=128))
         except DTComError as exc:
             self._set_com_error(exc)
             return self
+
+        self.results['BITERR'] = 100*nerrbits/self.parameters['BITNUM'] # percent of bit errors
 
         res = self._eval_dmr_errors()
         if res is None:
@@ -370,19 +382,38 @@ class DTDMRInput(DTTask):
         # TODO
         return None
 
+
 class DTDMROutput(DTTask):
     """
-    DMR output power measurement
+    DMR output set
     """
     name = dict(ru='Выход ЦР', en='DMR Output')
 
-    def __init__(self):
+    def __init__(self, frequency: int = 200*MHz, att: int = ):
         super().__init__()
-        # TODO
+        self.parameters['FREQUENCY'] = frequency
+        self.parameters['ATT'] = att
 
     def __call__(self):
-        # TODO
-        pass
+        self.failed = self.completed = False
+        if not self.check_all_parameters():
+            self._set_error('')
+            return self
+
+        try:
+            self.com.command(b'SET MEASST', 5)
+            isset, foffset = self.com.set_pll_freq(self.parameters['FREQUENCY'])
+            if not isset:
+                self._set_pll_error()
+                return self
+
+            self.com.command(b'SET ATT', self.parameters['ATT'])
+        except DTComError as exc:
+            self._set_com_error(exc)
+            return self
+
+        self._set_success()
+        return self
 
 
 class DTMeasureSensitivity(DTTask):
