@@ -15,7 +15,7 @@ lib: libdmr.so
 testpll: testpll.o pll.o
 	${LD} ${LDFLAGS} $^ -o $@
 
-libdmr.so: pll.o
+libdmr.so: pll.o inl.o
 	${LD} ${LDFLAGS} -shared $^ -o $@
 
 testser: testser.o
