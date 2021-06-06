@@ -5,6 +5,7 @@ from scipy.special import jn
 from scipy.fft import rfft, fftfreq
 from time import time
 import matplotlib.pyplot as plt
+import timeit
 
 _libdmr = cdll.LoadLibrary("./libdmr.so")
 
@@ -70,9 +71,21 @@ if __name__ == "__main__":
     f = fftfreq(N, T)[:N//2]
     af = 2/N*abs(rfft(at))[:-1]
 
+    dt = timeit.timeit('2/N*abs(rfft(at))[:-1]',
+                        number=100, globals=globals())/100
+    print(f'fft execution time: {dt:3g} sec')
+
+    dt = timeit.timeit('get_peak(af, int(fm*N*T*0.9), int(fm*N*T*1.1))', 
+                        number=100, globals=globals())/100
+    print(f'get_peak execution time: {dt:3f} sec')
+
     pwr, fpeak = get_peak(af, int(fm*N*T*0.9), int(fm*N*T*1.1))
     fpeak /= N*T  # transform to Hz
     print(f"Power={pwr:4g}, Fpeak={fpeak:.1f}Hz")
+
+    dt = timeit.timeit('get_inl(af, fm*N*T)',
+                        number=100, globals=globals())/100
+    print(f'get_inl execution time: {dt:3g} sec')
 
     inl, mi = get_inl(af, fm*N*T)
     print(f"INL={inl:5g}, MI={mi:.2f}")
