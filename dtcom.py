@@ -1,15 +1,17 @@
-import serial, time
+import serial
+import time
 from numbers import Integral
 
 from singleton import Singleton
 from exception import DTInternalError, DTComError
-import dtglobals as dtg
+# import dtglobals as dtg
 from c_api import get_pll_regs
 
 _END = b'END'
 _lenEND = len(_END)
 _ACK = b'ACK'
 _lenACK = len(_ACK)
+
 
 class DTSerialCom(metaclass=Singleton):
     """
@@ -32,10 +34,10 @@ class DTSerialCom(metaclass=Singleton):
     def timeout(self, to):
         self.port.timeout = to
 
-    def command(self, command: bytes, odata=None, owordsize=2, nreply: int=0):
+    def command(self, command: bytes, odata=None, owordsize=2, nreply=0):
         """
         Send a binary packet to the device, receive a binary packet from the device and return data as list of integers if any.
-        Command format: b'[COMMAND]\0[LEN][DATA]END\0', where [COMMAND] - command name, [LEN] - [LEN] - length of [DATA], 
+        Command format: b'[COMMAND]\0[LEN][DATA]END\0', where [COMMAND] - command name, [LEN] - [LEN] - length of [DATA],
                              [DATA] - sequence of little-endian 2-byte words.
         Acknowledgement response: b'ACK'
         Reply with results: b'[LEN][DATA]END\0'
@@ -43,31 +45,31 @@ class DTSerialCom(metaclass=Singleton):
         Parameters:
             command   - command name (ASCII)
             odata     - a bytes object or bytearray (transmitted as is) OR an integer OR a sequence of integers.
-                        In the latter 2 cases the word data length is calculated and prepended by the method, 
+                        In the latter 2 cases the word data length is calculated and prepended by the method,
                         the caller must not include it.
             owordsize - integer or list of integers output word size in bytes (2 and 4 only allowed).
-            nreply    - number of data words in the reply. 0 - if no reply besides 'ACK' is expected. 
+            nreply    - number of data words in the reply. 0 - if no reply besides 'ACK' is expected.
                         If nreply<0, then read all data available.
         """
         global _END, _lenEND, _ACK, _lenACK
         DEBUG = DTSerialCom.DEBUG
 
         raisesource = 'DTSerialCom.command()'
-        
-        # COMMAND null-terminated 
+
+        # COMMAND null-terminated
         packet = b'\0' + command + b'\0'
-        
+
         if isinstance(odata, bytes) or isinstance(odata, bytearray):
             packet += bytes(odata)
         elif isinstance(odata, Integral):
             if not isinstance(owordsize, Integral) or owordsize != 2 and owordsize != 4:
                 raise DTInternalError(raisesource, 'Output word size must be 2 or 4')
-            imask = (1<<owordsize*8)-1 # mask output data integers to fit to the requested byte-size
+            imask = (1 << owordsize*8)-1  # mask output data integers to fit to the requested byte-size
             # LEN in words
             packet += (owordsize//2).to_bytes(2, byteorder='little')
             # DATA as LE-bytes
-            packet += int(odata&imask).to_bytes(owordsize, byteorder='little', signed=False)
-        elif hasattr(odata, '__getitem__') and hasattr(odata, '__len__') and len(odata)>0:
+            packet += int(odata & imask).to_bytes(owordsize, byteorder='little', signed=False)
+        elif hasattr(odata, '__getitem__') and hasattr(odata, '__len__') and len(odata) > 0:
             if not all([isinstance(oword, Integral) for oword in odata]):
                 raise DTInternalError(raisesource, f'Some of output data words is not integer: {odata}.')
             if isinstance(owordsize, Integral):
@@ -80,10 +82,10 @@ class DTSerialCom(metaclass=Singleton):
                 lendata = len(odata)
                 if lenwsize == 0:
                     raise DTInternalError(raisesource, 'Output word size list must not be empty and contain only 2 or 4.')
-                elif set(owordsize+[2,4]) != {2, 4}:
+                elif set(owordsize+[2, 4]) != {2, 4}:
                     raise DTInternalError(raisesource, 'Output word size list must contain only 2 or 4.')
                 elif lenwsize < lendata:
-                    owordsize.extend([owordsize[-1]]*(lendata-lenwsize)) # extend word sizes with the last value
+                    owordsize.extend([owordsize[-1]]*(lendata-lenwsize))  # extend word sizes with the last value
                 elif lenwsize > lendata:
                     owordsize = owordsize[:lendata]
             elif not isinstance(owordsize, list) and not isinstance(owordsize, tuple) and not isinstance(owordsize, Integral):
@@ -93,12 +95,12 @@ class DTSerialCom(metaclass=Singleton):
             packet += (sum(owordsize)//2).to_bytes(2, byteorder='little')
             # DATA as LE-bytes
             for oword, osize in zip(odata, owordsize):
-                packet += int(oword&((1<<osize*8)-1)).to_bytes(osize, byteorder='little', signed=False)
-        elif odata is None or hasattr(odata, '__len__') and len(odata)==0:
+                packet += int(oword & ((1 << osize*8)-1)).to_bytes(osize, byteorder='little', signed=False)
+        elif odata is None or hasattr(odata, '__len__') and len(odata) == 0:
             packet += b'\0\0'
         else:
             raise DTInternalError(raisesource, 'Sending data type is expected to be bytes, integer or iterable of integers')
-        
+
         # null-terminated END
         packet += _END + b'\0'
 
@@ -150,10 +152,11 @@ class DTSerialCom(metaclass=Singleton):
         elif nreply > 0 and len(response) != nbexpect:
             raise DTComError(raisesource, f'Byte-length of the reply ({len(response)}) differs from expected one ({nbexpect})')
         else:
-            response = response[_lenACK:-_lenEND] # omit ACK & END'
+            response = response[_lenACK:-_lenEND]  # omit ACK & END
             length = int.from_bytes(response[:2], byteorder='little', signed=False)
             if length != (len(response)-2)/2:
-                raise DTComError(raisesource, f'Length of the reply ({(len(response)-2)/2}) in words differs from length read ({length})')
+                raise DTComError(raisesource, f'Length of the reply ({(len(response)-2)/2}) in ' +
+                                              f'words differs from length read ({length})')
 
             for pos in range(2, min(2+2*length, len(response)), 2):
                 rdata.append(int.from_bytes(response[pos:pos+2], byteorder='little', signed=False))
@@ -164,10 +167,10 @@ class DTSerialCom(metaclass=Singleton):
         start = time.time()
         while 1:
             resp = self.command(b'STATUS', nreply=1)
-            if len(resp) > 0 and resp[0]&mask > 0:
+            if len(resp) > 0 and resp[0] & mask > 0:
                 return (True, resp[0])
-            if timeout!=0 and time.time()-start > timeout:
-                return (False, resp[0] if len(resp)>0 else None)
+            if timeout != 0 and time.time()-start > timeout:
+                return (False, resp[0] if len(resp) > 0 else None)
             time.sleep(0.2)
         raise DTInternalError('DTSerialCom.wait_status()', 'End of function reached that must not happen')
 
@@ -175,7 +178,7 @@ class DTSerialCom(metaclass=Singleton):
         for foffset in (0, -5, 5):
             regs = get_pll_regs(frequency+foffset)
             self.command(b'LOAD PLL', [2, *regs], owordsize=[2]+6*[4])
-            isset, _status = self.wait_status(1<<3, timeout=2)
+            isset, _status = self.wait_status(1 << 3, timeout=2)
             if isset:
                 return isset, foffset
         return False, 0
@@ -183,4 +186,3 @@ class DTSerialCom(metaclass=Singleton):
     def __del__(self):
         if hasattr(self, 'port') and self.port.isOpen:
             self.port.close()
-            
