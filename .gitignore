@@ -1,3 +1,6 @@
 *.pyc
 *.o
 *.so
+*.d
+testpll
+testser
