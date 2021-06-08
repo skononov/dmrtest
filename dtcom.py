@@ -5,7 +5,7 @@ from numbers import Integral
 from singleton import Singleton
 from exception import DTInternalError, DTComError
 # import dtglobals as dtg
-from c_api import get_pll_regs
+from dt_c_api import get_pll_regs
 
 _END = b'END'
 _lenEND = len(_END)
@@ -145,12 +145,19 @@ class DTSerialCom(metaclass=Singleton):
 
         if len(response) == 0:
             raise DTComError(raisesource, 'No response from the device')
-        elif response[:_lenACK] != _ACK:
-            raise DTComError(raisesource, f'{_ACK} was not received')
-        elif response[-_lenEND:] != _END:
-            raise DTComError(raisesource, f'{_END} was not received')
-        elif nreply > 0 and len(response) != nbexpect:
-            raise DTComError(raisesource, f'Byte-length of the reply ({len(response)}) differs from expected one ({nbexpect})')
+        elif response == b'MCU BUSY':
+            raise DTComError(raisesource, 'MCU BUSY')
+
+        errmsg = ''
+        if response[:_lenACK] != _ACK:
+            errmsg += 'ACK was not received'
+        if response[-_lenEND:] != _END:
+            errmsg += '\nEND was not received'
+        if nreply > 0 and len(response) != nbexpect:
+            errmsg += f'\nByte-length of the reply ({len(response)}) differs from expected one ({nbexpect})'
+        if errmsg != '':
+            raise DTComError(raisesource, errmsg)
+
         else:
             response = response[_lenACK:-_lenEND]  # omit ACK & END
             length = int.from_bytes(response[:2], byteorder='little', signed=False)
