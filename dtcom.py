@@ -184,6 +184,8 @@ class DTSerialCom(metaclass=Singleton):
     def set_pll_freq(self, frequency: int):
         for foffset in (0, -5, 5):
             regs = get_pll_regs(frequency+foffset)
+            if regs is None:
+                continue
             self.command(b'LOAD PLL', [2, *regs], owordsize=[2]+6*[4])
             isset, _status = self.wait_status(1 << 3, timeout=2)
             if isset:

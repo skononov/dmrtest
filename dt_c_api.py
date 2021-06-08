@@ -8,11 +8,13 @@ def get_pll_regs(freq: int):
     """
     # init ctypes uint array with nulls
     regs = (c_uint*6)(*[0]*6)
-    _libdmr.getpllreg(c_uint(freq),
-                      c_int(1), c_int(1), c_int(0), c_int(0), c_int(0),
-                      regs)
-    regs = list(regs)
-    return regs
+    rc = _libdmr.getpllreg(c_uint(freq),
+                           c_int(1), c_int(1), c_int(0), c_int(0), c_int(0),
+                           regs)
+    if rc == 0:
+        return None
+
+    return list(regs)
 
 
 def get_peak(amp, start: int, end: int):
