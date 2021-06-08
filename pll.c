@@ -1,4 +1,5 @@
-#include <stdint.h>
+#include <stdio.h>
+#include "pll.h"
 
 static double gooderr;
 typedef struct pll_set {
@@ -169,10 +170,13 @@ double gooderrin
 	return apoint;
 }
 
-//pll_num =0  - MAIN PLL, 1 - EMI PLL
-
-void getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, int auxpow, uint32_t R[])
+int getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, int auxpow, uint32_t R[])
 {
+	if (setfreq < DTFREQLOWLIM || setfreq > DTFREQUPLIM) {
+		fprintf(stderr, "getpllreg(): frequency %u is out of allowed limits (%d, %d).\n", setfreq, DTFREQLOWLIM, DTFREQUPLIM);
+		return 0;
+	}
+
 	pll_set resset;	
 	pll(setfreq, &resset, 0, 1, 1023, 65535, 23, 4095, 5, 4400, 2200, 50);
 	
@@ -193,4 +197,5 @@ void getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow,
 	R[4]=4 + (mainpow<<3) + (maino<<5) + (auxpow<<6) + (auxo<<8) + (mltd<<10) + (resset.BandDiv<<12) + (divdeg<<20) + (1<<23);
 	R[5]=5+(1<<22) + (3<<19);
 	
+	return 1;
 }
