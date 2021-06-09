@@ -38,3 +38,6 @@ endif
 
 clean:
 	rm -f *.o ${TARGETS}
+
+depclean: clean
+	rm -f ${DEPS}
