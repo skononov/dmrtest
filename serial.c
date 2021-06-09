@@ -158,11 +158,15 @@ int writecommand(int fd, const char* command, unsigned* odata, int ndata)
         }
         pos = append_int(pos, 13, 2); //number of 16-bit words
         pos = append_int(pos, odata[0], 2);
+        if (DTSERIALDEBUG)
+            printf("PLL register values to write: ");
         for(int i = 1; i < ndata; i++) {
             pos = append_int(pos, odata[i], 4);
-            printf("%u ", from_le_bytes_to_uint(pos-4, 4));
+            if (DTSERIALDEBUG)
+                printf("%u ", from_le_bytes_to_uint(pos-4, 4));
         }
-        puts("");
+        if (DTSERIALDEBUG)
+            puts("");
     } else if (strncmp(command, "SET LFDAC", clen) == 0) {
         if (ndata != 2) {
             fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d are provided.\n", ndata);
