@@ -28,37 +28,34 @@
 int DTSERIALDEBUG = 0;
 
 
-
 static char* append_int(char* buf, unsigned int word, size_t size)
 {
-    char ch[4];
-    ch[0] = word&0xff;
-    ch[1] = (word>>8)&0xff;
+    buf[0] = word&0xff;
+    buf[1] = (word>>8)&0xff;
     if (size==4) {
-        ch[2] = (word>>16)&0xff;
-        ch[3] = (word>>24)&0xff;
+        buf[2] = (word>>16)&0xff;
+        buf[3] = (word>>24)&0xff;
     }
-    strncpy(buf, ch, size);
     return buf + size;
 }
 
 static unsigned int from_le_bytes_to_uint(const char* bytes, size_t size)
 {
     unsigned int u=0;
-    
+
     // limit size to avoid overflow
     size = size<=sizeof(int)?size:sizeof(int);
 
     for(size_t i=0; i<size; i++)
-        u += (bytes[i]&0xff)<<(8*i);
-    
+        u += ((unsigned)bytes[i]&0xff)<<(8*i);
+
     return u;
 }
 
 static void print_bytes(const char *buf, size_t n)
 {
     for(const char* ch=buf; ch<buf+n; ch++) {
-        if (isprint((int)*ch))
+        if (isalpha((int)*ch) || *ch == 32)
             printf("%c", *ch);
         else
             printf("\\x%02hhX", *ch);
@@ -66,7 +63,7 @@ static void print_bytes(const char *buf, size_t n)
     puts("");
 }
 
-static const char* strpollflags(int revents) 
+static const char* strpollflags(int revents)
 {
     static char str[200];
     static const char* sflags[] = {"POLLIN", "POLLERR", "POLLHUP", "POLLNVAL", "POLLPRI"};
@@ -75,7 +72,7 @@ static const char* strpollflags(int revents)
     str[0] = 0;
     for(int i=0; i<4; i++) {
         if ((revents&flags[i]) != 0) {
-            if (str[0] == 0) 
+            if (str[0] == 0)
                 strcpy(str, sflags[i]);
             else {
                 strncat(str, "|", 2);
@@ -130,13 +127,13 @@ int openserial(const char* devfn)
     return fd;
 }
 
-int writecommand(int fd, const char* command, unsigned int* odata, int ndata)
+int writecommand(int fd, const char* command, unsigned* odata, int ndata)
 {
     char *packet, *pos;
     int nb;
 
     size_t maxlen = strlen(command) + 4*ndata + strlen(ACK) + strlen(END) + 4;
-    
+
     packet = (char*)malloc(maxlen);
     if (!packet) {
         perror("Can not allocate buffer.");
@@ -150,7 +147,7 @@ int writecommand(int fd, const char* command, unsigned int* odata, int ndata)
 
     packet[0] = 0;
     size_t clen = strlen(command);
-    strncpy(packet+1, command, clen+1);
+    memcpy(packet+1, command, clen+1);
     pos = packet + clen + 2; //include also trailing null char
 
     if (strncmp(command, "LOAD PLL", clen) == 0) {
@@ -176,18 +173,18 @@ int writecommand(int fd, const char* command, unsigned int* odata, int ndata)
             return -1;
         }
 		uint32_t R[6];
-        if (DTSERIALDEBUG) 
+        if (DTSERIALDEBUG)
 		    printf("Call getpllreg for frequency %u\n", odata[0]);
 		if (!getpllreg(odata[0], 1, 1, 0, 0, 0, R)) // convert frequency to register values
-            return -1; 
+            return -1;
         unsigned odata1[7] = {2, R[0], R[1], R[2], R[3], R[4], R[5]};
         return writecommand(fd, "LOAD PLL", odata1, 7); // recursive call
     } else {
         pos = append_int(pos, ndata, 2); //number of 2-byte words
-        for(int i = 0; i < ndata; i++) 
+        for(int i = 0; i < ndata; i++)
             pos = append_int(pos, odata[i], 2); //assume 2 bytes for all data words
     }
-    strncpy(pos, END, strlen(END)+1);
+    memcpy(pos, END, strlen(END)+1);
     pos += strlen(END)+1;
 
     size_t n = pos-packet;
@@ -232,7 +229,7 @@ int readreply(int fd, float timeout, unsigned int *reply, unsigned int nreply)
 
     while (ntotb < nexpected) {
         clock_t curclock = clock();
-        
+
         if (timeout > 0) {
             toms = (int)(timeout*1000 - (curclock-startclock)*1000./CLOCKS_PER_SEC);
             if (toms <= 0)
@@ -283,7 +280,7 @@ int readreply(int fd, float timeout, unsigned int *reply, unsigned int nreply)
             for (; pos<final && ireply<nreply; pos+=2, ireply++) {
                 reply[ireply] = from_le_bytes_to_uint(pos, 2);
             }
-            if (rlength != ireply) 
+            if (rlength != ireply)
                 fprintf(stderr, "Length word read (%lu) differs from received number of words (%lu)\n", rlength, ireply);
         }
         if (!endread)
