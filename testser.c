@@ -3,7 +3,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include "serial.h"
+#include "dtserial.h"
 
 int main(int argc, char* argv[]) 
 {

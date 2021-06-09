@@ -3,7 +3,7 @@ import time
 from numbers import Integral
 
 from singleton import Singleton
-from exception import DTInternalError, DTComError
+from dtexcept import DTInternalError, DTComError
 # import dtglobals as dtg
 from dt_c_api import get_pll_regs
 

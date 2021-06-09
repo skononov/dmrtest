@@ -13,7 +13,7 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "pll.h"
+#include "dtpll.h"
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -46,8 +46,9 @@ static unsigned int from_le_bytes_to_uint(const char* bytes, size_t size)
     // limit size to avoid overflow
     size = size<=sizeof(int)?size:sizeof(int);
 
-    for(size_t i=0; i<size; i++)
+    for(size_t i=0; i<size; i++) {
         u += ((unsigned)bytes[i]&0xff)<<(8*i);
+    }
 
     return u;
 }
@@ -157,8 +158,11 @@ int writecommand(int fd, const char* command, unsigned* odata, int ndata)
         }
         pos = append_int(pos, 13, 2); //number of 16-bit words
         pos = append_int(pos, odata[0], 2);
-        for(int i = 1; i < ndata; i++)
+        for(int i = 1; i < ndata; i++) {
             pos = append_int(pos, odata[i], 4);
+            printf("%u ", from_le_bytes_to_uint(pos-4, 4));
+        }
+        puts("");
     } else if (strncmp(command, "SET LFDAC", clen) == 0) {
         if (ndata != 2) {
             fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d are provided.\n", ndata);

@@ -4,7 +4,7 @@ from scipy.fft import rfft
 from scipy.signal import blackman
 
 from dtcom import DTSerialCom
-from exception import DTInternalError, DTComError
+from dexcept import DTInternalError, DTComError
 from dt_c_api import get_peak, get_inl
 from dtglobals import kHz, MHz
 import dtglobals as dtg  # for dtg.LANG
@@ -561,7 +561,6 @@ class DTMeasureSensitivity(DTTask):
         inl, mi = get_inl(af, fm)
 
         return inl, mi
-
 
 
 class DTScenario:
