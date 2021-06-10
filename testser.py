@@ -28,12 +28,12 @@ if args.command == 'LOAD PLL':
         exit(1)
     owordsize = [2] + 6*[4]
 elif args.command == 'SET PLLFREQ':
-    if len(args.data) != 1:
-        print(f'"SET PLLFREQ" should be supplied with 1 integers')
+    if len(args.data) != 2:
+        print(f'"SET PLLFREQ" should be supplied with 2 integers')
         exit(1)
-    print(f"Setting frequency to PLL and wait for lock...")
-    isset, foffset = com.set_pll_freq(args.data[0])
-    print(f'Frequency is{"" if isset else " not"} set.' + (f'FOFFSET={foffset}' if isset else ''))
+    print(f"Setting frequency {args.data[1]} Hz to PLL {args.data[0]} and wait locking...")
+    isset, foffset = com.set_pll_freq(args.data[0], args.data[1])
+    print(f'Frequency is{"" if isset else " not"} set.' + (f' FOFFSET={foffset}' if isset else ''))
     exit(0)
 else:
     owordsize = args.s

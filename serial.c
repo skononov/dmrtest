@@ -169,23 +169,23 @@ int writecommand(int fd, const char* command, unsigned* odata, int ndata)
             puts("");
     } else if (strncmp(command, "SET LFDAC", clen) == 0) {
         if (ndata != 2) {
-            fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d are provided.\n", ndata);
+            fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d were provided.\n", ndata);
             return -1;
         }
         pos = append_int(pos, 3, 2); //number of 2-byte words
         pos = append_int(pos, odata[0], 2); //AMP
         pos = append_int(pos, odata[1], 4); //FREQ
     } else if (strncmp(command, "SET PLLFREQ", clen) == 0) {
-        if (ndata != 1) {
-            fprintf(stderr, "1 argument to command 'SET PLLFREQ' is expected, %d was provided.\n", ndata);
+        if (ndata != 2) {
+            fprintf(stderr, "2 arguments to command 'SET PLLFREQ' are expected, %d were provided.\n", ndata);
             return -1;
         }
 		uint32_t R[6];
         if (DTSERIALDEBUG)
 		    printf("Call getpllreg for frequency %u\n", odata[0]);
-		if (!getpllreg(odata[0], 1, 1, 0, 0, 0, R)) // convert frequency to register values
+		if (!getpllreg(odata[1], 1, 1, 0, 0, 0, R)) // convert frequency to register values
             return -1;
-        unsigned odata1[7] = {2, R[0], R[1], R[2], R[3], R[4], R[5]};
+        unsigned odata1[7] = {odata[0], R[0], R[1], R[2], R[3], R[4], R[5]};
         return writecommand(fd, "LOAD PLL", odata1, 7); // recursive call
     } else {
         pos = append_int(pos, ndata, 2); //number of 2-byte words
