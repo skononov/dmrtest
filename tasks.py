@@ -4,7 +4,7 @@ from scipy.fft import rfft
 from scipy.signal import blackman
 
 from dtcom import DTSerialCom
-from dexcept import DTInternalError, DTComError
+from dtexcept import DTInternalError, DTComError
 from dt_c_api import get_peak, get_inl
 from dtglobals import kHz, MHz
 import dtglobals as dtg  # for dtg.LANG
@@ -24,7 +24,7 @@ class DTTask:
         'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'lowlim': 1, 'uplim': 4096},
         'DATANUM': {'ru': 'Точек АЦП', 'en': 'ADC points', 'lowlim': 16, 'uplim': 16384},
         'FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency',
-                      'lowlim': 137*MHz, 'uplim': 800*MHz, 'dunit': ('MHz', MHz)},
+                      'lowlim': 138*MHz, 'uplim': 800*MHz, 'dunit': ('MHz', MHz)},
         'MODFREQUENCY': {'ru': 'Частота модуляции', 'en': 'Modulating frequency',
                          'lowlim': 1, 'uplim': 100*kHz, 'dunit': ('kHz', kHz)},
         'MODAMP': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'lowlim': 0, 'uplim': 0xFFFF},

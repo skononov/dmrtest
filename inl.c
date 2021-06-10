@@ -189,5 +189,3 @@ int get_inl(const double *amp, int num, double fm, double *pinl, double *ph)
 
 	return 1;
 }
-
-
