@@ -31,8 +31,8 @@ int main(int argc, char* argv[])
     int ndata = argc - iarg;
     if (ndata > 0) {
         odata = (unsigned int*)calloc(ndata, sizeof(int));
-        for (int i=0; i<ndata; i++, iarg++) 
-            odata[i] = (unsigned)atoi(argv[iarg]);
+        for (int i=0; i<ndata; i++, iarg++)
+            odata[i] = atoi(argv[iarg]);
     }
 
     int nwritten = writecommand(fd, command, odata, ndata);
@@ -56,7 +56,7 @@ int main(int argc, char* argv[])
     } else {
         printf("%d words received: ", nread);
         for(int i = 0; i < nread; i++) 
-            printf("0x%02hX ", idata[i]);
+            printf("%u ", idata[i]);
         puts("");
     }
 

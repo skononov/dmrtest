@@ -12,7 +12,7 @@ extern int openserial(const char* devfn);
 // command - command null-terminated string
 // odata - array of output data words
 // ndata - size of odata
-extern int writecommand(int fd, const char* command, unsigned int* odata, int ndata);
+extern int writecommand(int fd, const char* command, const unsigned int* odata, int ndata);
 
 // Read serial device until END is received or nreply words is read or timeout expired.
 // Actual number of received words is returned.

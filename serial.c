@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "dtpll.h"
+#include "dtserial.h"
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -128,7 +129,7 @@ int openserial(const char* devfn)
     return fd;
 }
 
-int writecommand(int fd, const char* command, unsigned* odata, int ndata)
+int writecommand(int fd, const char* command, const unsigned* odata, int ndata)
 {
     char *packet, *pos;
     int nb;
@@ -151,12 +152,12 @@ int writecommand(int fd, const char* command, unsigned* odata, int ndata)
     memcpy(packet+1, command, clen+1);
     pos = packet + clen + 2; //include also trailing null char
 
-    if (strncmp(command, "LOAD PLL", clen) == 0) {
+    if (strcmp(command, "LOAD PLL") == 0) {
         if (ndata != 7) {
             fprintf(stderr, "7 arguments to command 'LOAD PLL' are expected, %d are provided.\n", ndata);
             return -1;
         }
-        pos = append_int(pos, 13, 2); //number of 16-bit words
+        pos = append_int(pos, 13, 2); // number of 16-bit words
         pos = append_int(pos, odata[0], 2);
         if (DTSERIALDEBUG)
             printf("PLL register values to write: ");
@@ -167,30 +168,37 @@ int writecommand(int fd, const char* command, unsigned* odata, int ndata)
         }
         if (DTSERIALDEBUG)
             puts("");
-    } else if (strncmp(command, "SET LFDAC", clen) == 0) {
+    } else if (strcmp(command, "SET LFDAC") == 0) {
         if (ndata != 2) {
-            fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d are provided.\n", ndata);
+            fprintf(stderr, "2 arguments to command 'SET LFDAQ' are expected, %d were provided.\n", ndata);
             return -1;
         }
-        pos = append_int(pos, 3, 2); //number of 2-byte words
-        pos = append_int(pos, odata[0], 2); //AMP
-        pos = append_int(pos, odata[1], 4); //FREQ
-    } else if (strncmp(command, "SET PLLFREQ", clen) == 0) {
-        if (ndata != 1) {
-            fprintf(stderr, "1 argument to command 'SET PLLFREQ' is expected, %d was provided.\n", ndata);
+        pos = append_int(pos, 3, 2); // number of 2-byte words
+        pos = append_int(pos, odata[0], 2); // AMP
+        pos = append_int(pos, odata[1], 4); // FREQ
+    } else if (strcmp(command, "SET PLLFREQ") == 0) { // composite command
+        if (ndata != 2) {
+            fprintf(stderr, "2 arguments to command %s are expected, %d were provided.\n", command, ndata);
+            return -1;
+        }
+        if (odata[0] != 1 && odata[0] != 2) {
+            fprintf(stderr, "PLL_NUM for the command %s must be 1 or 2, not %u.\n", command, odata[0]);
             return -1;
         }
 		uint32_t R[6];
         if (DTSERIALDEBUG)
 		    printf("Call getpllreg for frequency %u\n", odata[0]);
-		if (!getpllreg(odata[0], 1, 1, 0, 0, 0, R)) // convert frequency to register values
+		if (!getpllreg(odata[1], 1, 1, 0, 0, 0, R)) // convert frequency to register values
             return -1;
-        unsigned odata1[7] = {2, R[0], R[1], R[2], R[3], R[4], R[5]};
-        return writecommand(fd, "LOAD PLL", odata1, 7); // recursive call
+        unsigned odata1[2] = {1, 1};
+        if (writecommand(fd, "SET PLL", odata1, 2) < 0 || readreply(fd, 2, NULL, 0) < 0)
+            return -1;
+        unsigned odata2[7] = {odata[0], R[0], R[1], R[2], R[3], R[4], R[5]};
+        return writecommand(fd, "LOAD PLL", odata2, 7);
     } else {
-        pos = append_int(pos, ndata, 2); //number of 2-byte words
+        pos = append_int(pos, ndata, 2); // number of 2-byte words
         for(int i = 0; i < ndata; i++)
-            pos = append_int(pos, odata[i], 2); //assume 2 bytes for all data words
+            pos = append_int(pos, odata[i], 2); // assume 2 bytes for all data words
     }
     memcpy(pos, END, strlen(END)+1);
     pos += strlen(END)+1;

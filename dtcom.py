@@ -181,13 +181,16 @@ class DTSerialCom(metaclass=Singleton):
             time.sleep(0.2)
         raise DTInternalError('DTSerialCom.wait_status()', 'End of function reached that must not happen')
 
-    def set_pll_freq(self, frequency: int):
+    def set_pll_freq(self, pllnum: int, frequency: int):
+        if pllnum not in (1, 2):
+            raise DTInternalError('DTSerialCom.set_pll_freq()', f'Illegal PLL_NUM value: {pllnum}')
         for foffset in (0, -5, 5):
             regs = get_pll_regs(frequency+foffset)
             if regs is None:
                 continue
-            self.command(b'LOAD PLL', [2, *regs], owordsize=[2]+6*[4])
-            isset, _status = self.wait_status(1 << 3, timeout=2)
+            self.command(b'SET PLL', [1, 1])
+            self.command(b'LOAD PLL', [pllnum, *regs], owordsize=[2]+6*[4])
+            isset, _status = self.wait_status(1 << (1+pllnum), timeout=2)
             if isset:
                 return isset, foffset
         return False, 0
