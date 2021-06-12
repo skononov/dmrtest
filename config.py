@@ -1,10 +1,11 @@
-import os, json
-from exception import DTError
+import json
+from dtexcept import DTError
+
 
 class DTConfiguration:
     """
     Configuration manager for the DMR TESTER GUI.
-    
+
     Scenario is a dict of tasks with a task name being a key and dict of parameters being a value. Task parameters are 
     stored as dictionaries with one obligatory element 'value' and two optional elements: 'minValue', 'maxValue'.
     """
@@ -12,14 +13,14 @@ class DTConfiguration:
 
     __appname__ = 'DMR TEST'
     __version__ = '0.1'
-    
+
     def __init__(self, filename=None):
         self.config = dict(scenarios={})
         if filename is not None:
             self.load(filename)
         else:
             self.load(DTConfiguration.__dtrcFilename)
-    
+
     def load(self, filename):
         try:
             with open(filename, 'r') as file:
@@ -83,7 +84,7 @@ class DTConfiguration:
             if task not in scenarios[scenario]:
                 scenarios[scenario][task] = dict()
             else:
-                
+
                 self.config['parameters'][task][param] = dict(value=value, minValue=minval, maxValue=maxval)
 
     def del_parameter(self, task, param):
