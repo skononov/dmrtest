@@ -34,7 +34,7 @@ class DTSerialCom(metaclass=Singleton):
     def timeout(self, to):
         self.port.timeout = to
 
-    def command(self, command: bytes, odata=None, owordsize=2, nreply=0):
+    def command(self, command, odata=None, owordsize=2, nreply=0):
         """
         Send a binary packet to the device, receive a binary packet from the device and return data as list of integers if any.
         Command format: b'[COMMAND]\0[LEN][DATA]END\0', where [COMMAND] - command name, [LEN] - [LEN] - length of [DATA],
@@ -57,7 +57,12 @@ class DTSerialCom(metaclass=Singleton):
         raisesource = 'DTSerialCom.command()'
 
         # COMMAND null-terminated
-        packet = b'\0' + command + b'\0'
+        if isinstance(command, str):
+            packet = b'\0' + bytes(command, encoding='utf-8') + b'\0'
+        elif isinstance(command, bytes) or isinstance(command, bytearray):
+            packet = b'\0' + bytes(command) + b'\0'
+        else:
+            raise DTInternalError(raisesource, f'Invalid type of command argument: {type(command)}')
 
         if isinstance(odata, bytes) or isinstance(odata, bytearray):
             packet += bytes(odata)
@@ -122,7 +127,7 @@ class DTSerialCom(metaclass=Singleton):
         # Read reply from the device
         try:
             nbexpect = 0
-            if nreply > 0:
+            if nreply >= 0:
                 # await 2*nreply bytes plus number of transmitted words (2 bytes) and END directive
                 nbexpect = 2*nreply+2+_lenACK+_lenEND
                 if DEBUG:
@@ -148,23 +153,22 @@ class DTSerialCom(metaclass=Singleton):
         elif response == b'MCU BUSY':
             raise DTComError(raisesource, 'MCU BUSY')
 
-        errmsg = ''
+        errmsgs = []
         if response[:_lenACK] != _ACK:
-            errmsg += 'ACK was not received'
+            errmsgs.append('ACK was not received')
         if response[-_lenEND:] != _END:
-            errmsg += '\nEND was not received'
+            errmsgs.append('END was not received')
         if nreply > 0 and len(response) != nbexpect:
-            errmsg += f'\nByte-length of the reply ({len(response)}) differs from expected one ({nbexpect})'
-        if errmsg != '':
-            raise DTComError(raisesource, errmsg)
-
+            errmsgs.append(f'Number of bytes in the reply ({len(response)}) does not match' +
+                           f' expected one ({nbexpect}). Can not read out data.')
+        if errmsgs != '':
+            raise DTComError(raisesource, '; '.join(errmsgs))
         else:
             response = response[_lenACK:-_lenEND]  # omit ACK & END
             length = int.from_bytes(response[:2], byteorder='little', signed=False)
             if length != (len(response)-2)/2:
-                raise DTComError(raisesource, f'Length of the reply ({(len(response)-2)/2}) in ' +
-                                              f'words differs from length read ({length})')
-
+                print(f'{raisesource}: Warning: Length of the reply ({(len(response)-2)//2}) in ' +
+                      f'words differs from length read ({length})')
             for pos in range(2, min(2+2*length, len(response)), 2):
                 rdata.append(int.from_bytes(response[pos:pos+2], byteorder='little', signed=False))
 
@@ -173,7 +177,7 @@ class DTSerialCom(metaclass=Singleton):
     def wait_status(self, mask: int, timeout=10):
         start = time.time()
         while 1:
-            resp = self.command(b'STATUS', nreply=1)
+            resp = self.command('STATUS', nreply=1)
             if len(resp) > 0 and resp[0] & mask > 0:
                 return (True, resp[0])
             if timeout != 0 and time.time()-start > timeout:
@@ -188,8 +192,8 @@ class DTSerialCom(metaclass=Singleton):
             regs = get_pll_regs(frequency+foffset)
             if regs is None:
                 continue
-            self.command(b'SET PLL', [1, 1])
-            self.command(b'LOAD PLL', [pllnum, *regs], owordsize=[2]+6*[4])
+            self.command('SET PLL', [1, 1])
+            self.command('LOAD PLL', [pllnum, *regs], owordsize=[2]+6*[4])
             isset, _status = self.wait_status(1 << (1+pllnum), timeout=2)
             if isset:
                 return isset, foffset

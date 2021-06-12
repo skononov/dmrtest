@@ -35,6 +35,11 @@ elif args.command == 'SET PLLFREQ':
     isset, foffset = com.set_pll_freq(args.data[0], args.data[1])
     print(f'Frequency is{"" if isset else " not"} set.' + (f' FOFFSET={foffset}' if isset else ''))
     exit(0)
+elif args.command == 'SET LFDAC':
+    if len(args.data) != 2:
+        print(f'"SET LFDAC" should be supplied with 2 integers')
+        exit(1)
+    owordsize = [2, 4]
 else:
     owordsize = args.s
 
