@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
         close(fd);
         return -1;
     } else if (nread==0) {
-        puts("Empty reply");
+        puts("No data read");
     } else {
         printf("%d words received: ", nread);
         for(int i = 0; i < nread; i++) 

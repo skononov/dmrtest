@@ -302,7 +302,7 @@ int readreply(int fd, float timeout, unsigned int *reply, unsigned int nreply)
         if (!endread)
             fprintf(stderr, "%s is not received\n", END);
     } else
-        printf("No data received\n");
+        printf("Empty reply\n");
 
     return ireply;
 }
