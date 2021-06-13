@@ -161,7 +161,7 @@ class DTSerialCom(metaclass=Singleton):
         if nreply > 0 and len(response) != nbexpect:
             errmsgs.append(f'Number of bytes in the reply ({len(response)}) does not match' +
                            f' expected one ({nbexpect}). Can not read out data.')
-        if errmsgs != '':
+        if len(errmsgs) > 0:
             raise DTComError(raisesource, '; '.join(errmsgs))
         else:
             response = response[_lenACK:-_lenEND]  # omit ACK & END
