@@ -6,17 +6,18 @@ from scipy.signal import blackman
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
 from dt_c_api import get_peak, get_inl
-from dtglobals import kHz, MHz
+from dtglobals import kHz, MHz, adcSampleFrequency, symbolDevFrequency
 import dtglobals as dtg  # for dtg.LANG
 
 dtTaskTypes = None
+
+dtScenarios = None
 
 
 class DTTask:
     """ Base class for a task with DMR TEST device. It defines some common data and methods for
         task parameter and status handling.
     """
-    adcSampleFrequency: int = 120000  # Hz
 
     # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
     __parameterData = {
@@ -67,6 +68,7 @@ class DTTask:
         """
         self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         self.failed = self.completed = False
+        self.message = ''
         if not self.check_all_parameters():
             self.__set_error('')
         return self
@@ -296,8 +298,8 @@ class DTMeasureCarrierFrequency(DTTask):
         if p0 == 0 or poff == 0:  # could not find peaks
             return None
 
-        f0 = f0/N*self.adcSampleFrequency - self.foffset0  # Hz
-        foff = foff/N*self.adcSampleFrequency - self.foffset  # Hz
+        f0 = f0/N*adcSampleFrequency - self.foffset0  # Hz
+        foff = foff/N*adcSampleFrequency - self.foffset  # Hz
         F = self.parameters['FREQUENCY']
         dF = self.nominalCarrierOffset
 
@@ -377,14 +379,15 @@ class DTMeasureNonlinearity(DTTask):
             return None
 
         N = len(self.buffer)//2
+        bwin = blackman(N)
 
         It = self.buffer[:N]  # take first half of the buffer as the I input
         Qt = self.buffer[N:]  # take first half of the buffer as the Q input
         # Compute FFT (non-negative frequencies only)
-        If = self.results['IFFT'] = 2/N*np.abs(rfft(blackman(N)*np.array(It, dtype=np.float64)))
-        Qf = self.results['QFFT'] = 2/N*np.abs(rfft(blackman(N)*np.array(Qt, dtype=np.float64)))
+        If = self.results['IFFT'] = 2/N*np.abs(rfft(bwin*np.array(It, dtype=np.float64)))
+        Qf = self.results['QFFT'] = 2/N*np.abs(rfft(bwin*np.array(Qt, dtype=np.float64)))
 
-        fm = self.parameters['MODFREQUENCY']/self.adcSampleFrequency * N
+        fm = self.parameters['MODFREQUENCY']/adcSampleFrequency * N
         inl, mi = get_inl(np.sqrt(If**2+Qf**2), fm)
 
         inl *= 100  # transform INL to percent
@@ -398,6 +401,8 @@ class DTDMRInput(DTTask):
     """
     name = dict(ru='Вход ЦР', en='DMR Input')
 
+    refFreq = np.array([symbolDevFrequency, 3*symbolDevFrequency]*2)
+
     def __init__(self, frequency: int = 200*MHz, bitnum: int = 1000):
         super().__init__()
         self.parameters['FREQUENCY'] = frequency
@@ -405,6 +410,9 @@ class DTDMRInput(DTTask):
 
         # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
         self.bufsize = 255*2*25*2
+
+        # length of array for FFT analysis
+        self.fftlen = 100
 
     def init_meas(self):
         super().init_meas()
@@ -426,34 +434,114 @@ class DTDMRInput(DTTask):
 
     def measure(self):
         self.completed = False
+        self.results['BITERR'] = None
+        self.results['BITFREQDEV'] = None
+        self.results['BITPOWERDIF'] = None
+
         if self.failed:
             return self
 
         try:
             # read out the number of error dibits
-            nerrbits = self.com.command('GET BITERR', self.bufsize, nreply=1)[0]
-
+            nerrbits = self.com.command('GET BITERR', self.parameters['BITNUM'], nreply=1)[0]
             # read out the ADC data for dibit sequence
             self.buffer = self.com.command('GET DMRDIBIT', nreply=self.bufsize)
         except DTComError as exc:
             self.__set_com_error(exc)
             return self
 
-        self.results['BITERR'] = 100*nerrbits/self.parameters['BITNUM']  # percent of bit errors
+        self.results['BITERR'] = 100 * nerrbits/self.parameters['BITNUM']  # percent of bit errors
 
-        res = self.__eval_dmr_errors()
+        res = self.__dmr_analysis()
         if res is None:
             self.__set_eval_error()
             return self
 
-        # TODO getting results
+        self.results['BITFREQDEV'] = res[0]
+        self.results['BITPOWERDIF'] = res[1]
         self.__set_success()
 
         return self
 
-    def __eval_dmr_errors(self):
-        # TODO
-        return None
+    def __update_best_point(self, amp, cpos: int, bestamp, bestpos):
+        pwr = np.zeros(4)
+        jl = -1
+
+        pwr = [(amp[5]-amp[0])**2 + (amp[4]+amp[1])**2,  # +1 dibit=00
+               (amp[7]-amp[2])**2 + (amp[6]+amp[3])**2,  # +3 dibit=01
+               (amp[5]+amp[0])**2 + (amp[4]-amp[1])**2,  # -1 dibit=10
+               (amp[7]+amp[2])**2 + (amp[6]-amp[3])**2]  # -3 dibit=11
+
+        if pwr[0] > pwr[1] and pwr[0] > pwr[2] and pwr[0] > pwr[3]:
+            jl = 0
+        elif pwr[1] > pwr[2] and pwr[1] > pwr[3]:
+            jl = 1
+        elif pwr[2] > pwr[3]:
+            jl = 2
+        else:
+            jl = 3
+
+        g = pwr[jl]/(sum(pwr)-pwr[jl]+0.000001)
+
+        if g > bestamp[jl]:
+            bestamp[jl] = g
+            bestpos[jl] = cpos + self.fftlen//2
+
+        return bestamp, bestpos
+
+    def __get_best_symbol_points(self, It, Qt):
+        w = 2*np.pi*symbolDevFrequency/adcSampleFrequency
+        ww = np.array([w, w, 3*w, 3*w]*2)
+        phases = np.array([0, np.pi/2]*4)
+        num = len(It)
+
+        bestamp = np.zeros(4, dtype=float)  # 0,2 - 648 Hz, 1,3 - 1944 Hz
+        bestpos = np.empty(4, dtype=int)
+
+        amp = np.zeros(8, dtype=float)
+
+        for i in range(self.fftlen):
+            amp += np.array([It[i]]*4+[Qt[i]]*4)*np.sin(ww*i+phases)
+            self.__update_best_point(amp, 0, bestamp, bestpos)
+
+        for i in range(num-self.fftlen):
+            amp += np.array([It[(i+self.fftlen)]]*4 + [Qt[(i+self.fftlen)]]*4) * np.sin(ww*(i+self.fftlen)+phases) -\
+                   np.array([It[i]]*4 + [Qt[i]]*4) * np.sin(ww*i+phases)
+            self.__update_best_point(amp, i, bestamp, bestpos)
+
+        bestpos = np.fmin(num-self.fftlen//2-1, np.fmax(self.fftlen//2+1, bestpos))
+
+        return bestpos
+
+    def __dmr_analysis(self):
+        if self.buffer is None or len(self.buffer) != self.busize:
+            return None
+
+        bwin = blackman(self.fftlen)
+
+        It = self.buffer[:self.bufsize//2]
+        Qt = self.buffer[self.bufsize//2:]
+
+        bestpos = self.__get_best_symbol_points(It, Qt)
+
+        pwr = np.zeros(4, float)
+        fpeak = np.zeros(4, float)
+
+        for i in range(4):
+            Itr = It[bestpos[i]-self.fftlen/2:bestpos[i]+self.fftlen/2]
+            Qtr = Qt[bestpos[i]-self.fftlen/2:bestpos[i]+self.fftlen/2]
+
+            If = 2/self.fftlen*np.abs(rfft(bwin*np.array(Itr, dtype=np.float64)))
+            Qf = 2/self.fftlen*np.abs(rfft(bwin*np.array(Qtr, dtype=np.float64)))
+
+            amp = np.sqrt(If**2 + Qf**2)
+            pwr[i], fpeak[i] = get_peak(amp, int(self.refFreq[i]*0.9), int(self.refFreq[i]*1.1))
+
+        fdev = np.abs(fpeak-self.refFreq)
+        ampf = np.sqrt(pwr)
+        min_ampf, max_ampf = min(ampf), max(ampf)
+
+        return fdev, 2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
 
 
 class DTDMROutput(DTTask):
@@ -529,51 +617,91 @@ class DTMeasureSensitivity(DTTask):
 
         return self
 
+    def __measure_inl_for_att(self, attcode: int):
+        ampuplim = 0xFFFF
+        bsize = self.parameters['DATANUM']
+        tsize = 1024
+
+        self.com.command("SET ATT", attcode)
+        self.com.command("SET LF RANGE", self.adcrange)
+
+        # find appropriate LF ADC range
+        buf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
+        amax = max(abs(buf.max()), abs(buf.min()))
+        tryrange = self.adcrange
+        if amax/ampuplim < 0.7:
+            while tryrange < 4 and amax/ampuplim*self.__adcVoltRange[self.adcrange]/self.__adcVoltRange[tryrange+1] < 0.9:
+                tryrange += 1
+            if tryrange != self.adcrange:
+                self.com.command("SET LF RANGE", tryrange)
+        elif amax/ampuplim > 0.9:
+            while tryrange > 0:
+                # update ADC data in case of saturation
+                tryrange -= 1
+                self.com.command("SET LF RANGE", tryrange)
+                buf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
+                amax = max(abs(buf.max()), abs(buf.min()))
+                if amax/ampuplim <= 0.9:
+                    break
+        self.adcrange = tryrange
+
+        if amax/ampuplim > 0.9:
+            self.__set_error('LF input is out of ADC range' if dtg.LANG == 'en' else 'НЧ вход вне диапазона АЦП')
+            return False
+
+        self.buffer = np.array(self.com.command('GET ADC DAT', [3, bsize], nreply=bsize))
+
+        inl = self.__eval_inl()
+        if inl is None:
+            self.__set_eval_error()
+            return False
+
+        if inl <= self.parameters['REFINL']:
+            return True
+
+        return False
+
     def measure(self):
         self.completed = False
-        ampuplim = 2**16-1
-        bsize = self.parameters['DATANUM']
-        tsize = 200  # some buffer size just for estimation of the range
-        refinl = self.parameters['REFINL']
+        self.adcrange = 0
 
         try:
-            adcrange = 0
-            # TODO: implement search of attenuation by division method
-            _status = 'ok'
-            for attcode in range(1, 63):
-                self.com.command("SET ATT", attcode)
-
-                self.com.command("SET LF RANGE", adcrange)
-
-                # reading ADC data for range estimation
-                tbuf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
-                amax = max(abs(tbuf.max()), abs(tbuf.min()))
-                tryrange = adcrange
-                if amax/ampuplim < 0.7:
-                    while tryrange < 4 and amax/ampuplim*self.__adcVoltRange[adcrange]/self.__adcVoltRange[tryrange+1] < 0.9:
-                        tryrange += 1
-                elif amax/ampuplim > 0.9:
-                    while tryrange > 0:
-                        # update ADC data in case of saturation
-                        tbuf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
-                        amax = max(abs(tbuf.max()), abs(tbuf.min()))
-                        tryrange -= 1
-                adcrange = tryrange
-                self.com.command("SET LF RANGE", adcrange)
-
-                self.buffer = self.com.command('GET ADC DAT', [3, bsize], nreply=bsize)
-                inl = self.__eval_inl()
-                if inl is None:
-                    continue
-                elif inl < refinl:
-                    break
+            attrange = range(1, 64)
+            lastinlcomp = True
+            while len(attrange) > 1:
+                midindex = len(attrange)//2
+                attcode = attrange[midindex]
+                lastinlcomp = self.__measure_inl_for_att(attcode)
+                if lastinlcomp:  # inl < refinl
+                    attrange = attrange[midindex:]
+                else:
+                    if self.failed:  # failed to measure INL
+                        return self
+                    attrange = attrange[:midindex]
         except DTComError as exc:
             self.__set_com_error(exc)
             return self
 
-        refpower = self.parameters['REFOUTPOWER']
-        refatt = self.parameters['REFATT']
-        self.results['OUTPUT POWER'] = dict(value=(refpower + refatt - 0.5*attcode), status=_status)
+        if attcode != attrange[0]:
+            # do last measurement if INL
+            attcode = attrange[0]
+            lastinlcomp = self.__measure_inl_for_att(attcode)
+
+        if lastinlcomp and attcode == 63:
+            # threshold power is lower than achievable
+            status = -1
+        elif not lastinlcomp and attcode == 1:
+            # threshold power is higher than achievable
+            status = 1
+        elif attcode < 63 and lastinlcomp == self.__measure_inl_for_att(attcode+1):
+            # Could not find the exact threshold. Signal is fluctuating?
+            status = 2
+        else:
+            status = 0
+
+        self.results['THRESHOLD POWER'] =\
+            ((self.parameters['REFOUTPOWER'] + self.parameters['REFATT'] - 0.5*attcode),
+             status)
         self.__set_success()
 
         return self
@@ -587,7 +715,7 @@ class DTMeasureSensitivity(DTTask):
         # Compute FFT (non-negative frequencies only)
         af = self.results['IFFT'] = 2/N*np.abs(rfft(blackman(N)*np.array(self.buffer, dtype=np.float64)))
 
-        fm = self.parameters['MODFREQUENCY']/self.adcSampleFrequency * N
+        fm = self.parameters['MODFREQUENCY']/adcSampleFrequency * N
         inl, mi = get_inl(af, fm)
 
         return 100*inl
@@ -624,8 +752,9 @@ class DTScenario:
 
 
 def dtTaskInit():
-    global dtTaskTypes
+    global dtTaskTypes, dtScenarios
     dtTaskTypes = list()
+    dtScenarios = list()
     for taskClass in (DTCalibrate, DTMeasurePower, DTMeasureCarrierFrequency,
                       DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity):
         dtTaskTypes.append(taskClass)
