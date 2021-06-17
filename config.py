@@ -1,18 +1,18 @@
 import json
 from dtexcept import DTError
 
+__appname__ = 'DMR TEST'
+__version__ = '0.1'
+
 
 class DTConfiguration:
     """
     Configuration manager for the DMR TESTER GUI.
 
-    Scenario is a dict of tasks with a task name being a key and dict of parameters being a value. Task parameters are 
+    Scenario is a dict of tasks with a task name being a key and dict of parameters being a value. Task parameters are
     stored as dictionaries with one obligatory element 'value' and two optional elements: 'minValue', 'maxValue'.
     """
-    __dtrcFilename = '~/.dmrtestconf.json'
-
-    __appname__ = 'DMR TEST'
-    __version__ = '0.1'
+    __dtrcFilename = '~/.dtconf.json'
 
     def __init__(self, filename=None):
         self.config = dict(scenarios={})

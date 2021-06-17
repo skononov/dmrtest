@@ -2,6 +2,7 @@ import time
 import numpy as np
 from scipy.fft import rfft
 from scipy.signal import blackman
+from numbers import Integral, Real
 
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
@@ -10,8 +11,8 @@ from dtglobals import kHz, MHz, adcSampleFrequency, symbolDevFrequency
 import dtglobals as dtg  # for dtg.LANG
 
 dtTaskTypes = None
-
-dtScenarios = None
+dtTaskTypeDict = None
+dtAllScenarios = None
 
 
 class DTTask:
@@ -21,16 +22,17 @@ class DTTask:
 
     # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
     __parameterData = {
-        'ATT': {'ru': 'Затухание', 'en': 'Attenuation', 'lowlim': 0.5, 'uplim': 31.5, 'dunit': 'dB'},
-        'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'lowlim': 1, 'uplim': 4096, 'dunit': '1'},
-        'DATANUM': {'ru': 'Точек АЦП', 'en': 'ADC points', 'lowlim': 16, 'uplim': 16384, 'dunit': '1'},
-        'FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency',
+        'ATT': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real, 'lowlim': 0.5, 'uplim': 31.5, 'dunit': 'dB'},
+        'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'type': Integral, 'lowlim': 1, 'uplim': 4096, 'dunit': '1'},
+        'DATANUM': {'ru': 'Точек АЦП', 'en': 'ADC points', 'type': Integral, 'lowlim': 16, 'uplim': 16384, 'dunit': '1'},
+        'FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
                       'lowlim': 138*MHz, 'uplim': 800*MHz, 'dunit': 'MHz'},
-        'MODFREQUENCY': {'ru': 'Частота модуляции', 'en': 'Modulating frequency',
+        'MODFREQUENCY': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
                          'lowlim': 1, 'uplim': 100*kHz, 'dunit': 'kHz'},
-        'MODAMP': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'lowlim': 0, 'uplim': 0xFFFF, 'dunit': 'V'},
-        'BITNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'lowlim': 100, 'uplim': 2000, 'dunit': '1'},
-        'REFINL': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'lowlim': 1, 'uplim': 100, 'dunit': '%'},
+        'MODAMP': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'type': Integral,
+                   'lowlim': 0, 'uplim': 0xFFFF, 'dunit': 'V'},
+        'BITNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral, 'lowlim': 100, 'uplim': 2000, 'dunit': '1'},
+        'REFINL': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real, 'lowlim': 0.1, 'uplim': 100, 'dunit': '%'},
     }
 
     # dict for results desciption
@@ -83,8 +85,9 @@ class DTTask:
             raise DTInternalError(self.__class__.__name__+'.check_parameter', f'Unknown parameter "{par}"')
 
         pardata = DTTask.__parameterData[par]
-        if not isinstance(self.parameters[par], int) and par != 'ATT' and par != 'REFINL':
-            raise DTInternalError(self.__class__.__name__+'.check_parameter', f'Parameter "{par}" must be integer')
+        if not isinstance(self.parameters[par], pardata['type']):
+            raise DTInternalError(self.__class__.__name__+'.check_parameter',
+                                  f'Parameter "{par}" must be of type {pardata["type"]}')
         elif self.parameters[par] > pardata['uplim'] or self.parameters[par] < pardata['lowlim']:
             if self.message:
                 self.message += '\n'
@@ -722,14 +725,25 @@ class DTMeasureSensitivity(DTTask):
 
 
 class DTScenario:
-    def __init__(self, name: str, tasktypes=None):
+    def __init__(self, name: str, tasknames=None):
+        global dtTaskTypeDict, dtAllScenarios
         self.name = name
         self.tasks = list()
-        if dtTaskTypes is None:
+        if dtTaskTypeDict is None or dtAllScenarios is None:
             dtTaskInit()
-        if tasktypes is not None:
-            for tasktype in tasktypes:
-                self.addTask(tasktype)
+
+        if name in dtAllScenarios:
+            raise DTInternalError(self.__class__.__name__, f'Scanario with name {name} already exists')
+
+        try:
+            taskname = ''
+            if tasknames is not None:
+                for taskname in tasknames:
+                    self.addTask(dtTaskTypeDict[dtg.LANG][taskname])
+        except KeyError as exc:
+            raise DTInternalError(self.__class__.__name__, f'No task {taskname} defined') from exc
+
+        dtAllScenarios[name] = self
 
     def addTask(self, tasktype: DTTask):
         if tasktype not in dtTaskTypes:
@@ -749,12 +763,16 @@ class DTScenario:
     def __del__(self):
         for instance in self.tasks:
             del instance
+        dtAllScenarios.remove(self)
 
 
 def dtTaskInit():
-    global dtTaskTypes, dtScenarios
+    global dtTaskTypes, dtTaskTypeDict, dtAllScenarios
     dtTaskTypes = list()
-    dtScenarios = list()
+    dtTaskTypeDict = dict(ru=dict(), en=dict())
+    dtAllScenarios = dict()
     for taskClass in (DTCalibrate, DTMeasurePower, DTMeasureCarrierFrequency,
                       DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity):
         dtTaskTypes.append(taskClass)
+        for lang in dtTaskTypeDict:
+            dtTaskTypeDict[lang][taskClass.name[lang]] = taskClass
