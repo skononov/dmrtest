@@ -23,16 +23,19 @@ class DTTask:
     # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
     __parameterData = {
         'ATT': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real, 'lowlim': 0.5, 'uplim': 31.5, 'dunit': 'dB'},
-        'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'type': Integral, 'lowlim': 1, 'uplim': 4096, 'dunit': '1'},
+        'AVENUM': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'type': Integral,
+                   'lowlim': 1, 'uplim': 4096, 'dunit': '1'},
         'DATANUM': {'ru': 'Точек АЦП', 'en': 'ADC points', 'type': Integral, 'lowlim': 16, 'uplim': 16384, 'dunit': '1'},
         'FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
                       'lowlim': 138*MHz, 'uplim': 800*MHz, 'dunit': 'MHz'},
         'MODFREQUENCY': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
                          'lowlim': 1, 'uplim': 100*kHz, 'dunit': 'kHz'},
         'MODAMP': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'type': Integral,
-                   'lowlim': 0, 'uplim': 0xFFFF, 'dunit': 'V'},
-        'BITNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral, 'lowlim': 100, 'uplim': 2000, 'dunit': '1'},
-        'REFINL': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real, 'lowlim': 0.1, 'uplim': 100, 'dunit': '%'},
+                   'lowlim': 0, 'uplim': 0xFFFF, 'dunit': '1'},
+        'BITNUM': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
+                   'lowlim': 100, 'uplim': 2000, 'dunit': '1'},
+        'REFINL': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real,
+                   'lowlim': 0.1, 'uplim': 100, 'dunit': '%'}
     }
 
     # dict for results desciption
@@ -65,12 +68,15 @@ class DTTask:
         self.failed = False  # if last task call is failed
         self.completed = False  # if task is successfully completed
 
-    def init_meas(self):
+    def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device for the task.
         """
         self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         self.failed = self.completed = False
         self.message = ''
+        for par in kwargs:
+            if par in self.parameters:
+                self.parameters[par] = kwargs[par]
         if not self.check_all_parameters():
             self.__set_error('')
         return self
@@ -155,8 +161,8 @@ class DTCalibrate(DTTask):
     def __init__(self):
         super().__init__()
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
 
         try:
             self.com.command('SET MEASST', 1)
@@ -189,8 +195,8 @@ class DTMeasurePower(DTTask):
         self.parameters['AVENUM'] = avenum
         self.parameters['ATT'] = att
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -237,8 +243,8 @@ class DTMeasureCarrierFrequency(DTTask):
         self.parameters['DATANUM'] = datanum
         self.buffer = None
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -329,8 +335,8 @@ class DTMeasureNonlinearity(DTTask):
         self.parameters['MODFREQUENCY'] = modfreq
         self.parameters['DATANUM'] = bufsize
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -383,6 +389,7 @@ class DTMeasureNonlinearity(DTTask):
 
         N = len(self.buffer)//2
         bwin = blackman(N)
+        bwin /= np.sqrt(sum(bwin**2)/N)
 
         It = self.buffer[:N]  # take first half of the buffer as the I input
         Qt = self.buffer[N:]  # take first half of the buffer as the Q input
@@ -417,8 +424,8 @@ class DTDMRInput(DTTask):
         # length of array for FFT analysis
         self.fftlen = 100
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -521,6 +528,7 @@ class DTDMRInput(DTTask):
             return None
 
         bwin = blackman(self.fftlen)
+        bwin /= np.sqrt(sum(bwin**2)/self.fftlen)
 
         It = self.buffer[:self.bufsize//2]
         Qt = self.buffer[self.bufsize//2:]
@@ -558,8 +566,8 @@ class DTDMROutput(DTTask):
         self.parameters['FREQUENCY'] = frequency
         self.parameters['ATT'] = att
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -599,8 +607,8 @@ class DTMeasureSensitivity(DTTask):
         self.parameters['DATANUM'] = datanum
         self.buffer = None
 
-    def init_meas(self):
-        super().init_meas()
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
         if self.failed:
             return self
 
@@ -714,9 +722,10 @@ class DTMeasureSensitivity(DTTask):
             return None
 
         N = len(self.buffer)
+        bwin = blackman(N)/np.sqrt(sum(blackman(N)**2)/N)
 
         # Compute FFT (non-negative frequencies only)
-        af = self.results['IFFT'] = 2/N*np.abs(rfft(blackman(N)*np.array(self.buffer, dtype=np.float64)))
+        af = self.results['IFFT'] = 2/N*np.abs(rfft(bwin*np.array(self.buffer, dtype=np.float64)))
 
         fm = self.parameters['MODFREQUENCY']/adcSampleFrequency * N
         inl, mi = get_inl(af, fm)

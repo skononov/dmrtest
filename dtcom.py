@@ -1,6 +1,7 @@
 import serial
 import time
 from numbers import Integral
+from numpy import frombuffer, uint16
 
 from singleton import Singleton
 from dtexcept import DTInternalError, DTComError
@@ -40,7 +41,8 @@ class DTSerialCom(metaclass=Singleton):
         Command format: b'[COMMAND]\0[LEN][DATA]END\0', where [COMMAND] - command name, [LEN] - [LEN] - length of [DATA],
                              [DATA] - sequence of little-endian 2-byte words.
         Acknowledgement response: b'ACK'
-        Reply with results: b'[LEN][DATA]END\0'
+        Device must reply: b'[LEN][DATA]END\0'
+        Method returns the NumPy array of uint16 with received data if any.
 
         Parameters:
             command   - command name (ASCII)
@@ -145,11 +147,6 @@ class DTSerialCom(metaclass=Singleton):
 
         if response == b'':
             raise DTComError(raisesource, f'Empty answer or timeout {self.port.timeout}s expired.')
-
-        rdata = list()
-
-        if len(response) == 0:
-            raise DTComError(raisesource, 'No response from the device')
         elif response == b'MCU BUSY':
             raise DTComError(raisesource, 'MCU BUSY')
 
@@ -163,14 +160,20 @@ class DTSerialCom(metaclass=Singleton):
                            f' expected one ({nbexpect}). Can not read out data.')
         if len(errmsgs) > 0:
             raise DTComError(raisesource, '; '.join(errmsgs))
-        else:
-            response = response[_lenACK:-_lenEND]  # omit ACK & END
-            length = int.from_bytes(response[:2], byteorder='little', signed=False)
-            if length != (len(response)-2)/2:
-                print(f'{raisesource}: Warning: Length of the reply ({(len(response)-2)//2}) in ' +
-                      f'words differs from length read ({length})')
-            for pos in range(2, min(2+2*length, len(response)), 2):
-                rdata.append(int.from_bytes(response[pos:pos+2], byteorder='little', signed=False))
+
+        if nreply == 0:
+            return None
+
+        rdata = None
+
+        response = response[_lenACK:-_lenEND]  # omit ACK & END
+        actualLength = (len(response)-2)//2  # actual response data length in 2-byte words
+        length = int.from_bytes(response[:2], byteorder='little', signed=False)
+        if length != actualLength:
+            print(f'{raisesource}: Warning: Length of the reply ({actualLength}) in ' +
+                  f'words differs from length read ({length})')
+            length = actualLength
+        rdata = frombuffer(response[2:], dtype=uint16, count=length)
 
         return rdata
 

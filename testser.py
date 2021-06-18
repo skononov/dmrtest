@@ -45,7 +45,7 @@ else:
 
 print(f"Call:", args.command, *args.data)
 reply = com.command(args.command.encode(), odata=args.data, owordsize=owordsize, nreply=args.expect)
-if reply != []:
+if reply is not None:
     print(f"Reply:", *reply)
 else:
     print(f"Empty reply")
