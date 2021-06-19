@@ -1,8 +1,10 @@
 from dt_c_api import get_peak, get_inl
 from numpy import pi, linspace, sin, abs, sqrt
 from numpy.fft import rfft as np_rfft
-import pyfftw
-import multiprocessing
+try:
+    import pyfftw
+except ImportError:
+    pyfftw = None
 from numpy.random import default_rng
 from scipy.special import jn
 from scipy.signal import blackman
@@ -13,6 +15,7 @@ import timeit
 import os
 
 if __name__ == "__main__":
+    plt.style.use('dark_background')
     rng = default_rng(int(time()))
 
     print("\nTesting spectrum peak search & INL")
@@ -26,8 +29,11 @@ if __name__ == "__main__":
     at = sum([jn(n, d)/jn(1, d) * sin(2*pi*(n*fm*t + rng.random()))
               for n in range(1, 10)]) + rng.normal(0, rmsnoise, N)
 
-    atw = blackman(N)*sum([jn(n, d)/jn(1, d)*sin(2*pi*(n*fm*t + rng.random()))
-                           for n in range(1, 10)])/sqrt(sum(blackman(N)**2)/N)
+    bwin = blackman(N)
+    bwin /= sqrt(sum(bwin**2)/N)
+
+    atw = bwin*sum([jn(n, d)/jn(1, d)*sin(2*pi*(n*fm*t + rng.random()))
+                    for n in range(1, 10)])
     atw += rng.normal(0, rmsnoise, N)
 
     f = rfftfreq(N, T)
@@ -42,12 +48,12 @@ if __name__ == "__main__":
                        number=100, globals=globals())/100
     print(f'numpy.fft.rfft execution time: {dt:3g} sec')
 
-    pyfftw.interfaces.cache.enable()
-    pyfftw.interfaces.numpy_fft.rfft(atw)  # first run for optimization
-
-    dt = timeit.timeit('pyfftw.interfaces.numpy_fft.rfft(atw)',
-                       number=100, globals=globals())/100
-    print(f'pyfftw.interfaces.numpy_fft.rfft execution time: {dt:3g} sec')
+    if pyfftw is not None:
+        pyfftw.interfaces.cache.enable()
+        pyfftw.interfaces.numpy_fft.rfft(atw)  # first run for optimization
+        dt = timeit.timeit('pyfftw.interfaces.numpy_fft.rfft(atw)',
+                           number=100, globals=globals())/100
+        print(f'pyfftw.interfaces.numpy_fft.rfft execution time: {dt:3g} sec')
 
     dt = timeit.timeit('get_peak(af, int(fm*N*T*0.9), int(fm*N*T*1.1))',
                        number=100, globals=globals())/100
@@ -79,8 +85,8 @@ if __name__ == "__main__":
     plt.title(r'$f_{mod}$=%.1f kHz, MI=%.1f, $RMS_{noise}=%2g$' % (fm/1000, d, rmsnoise))
 
     plt.subplot(212)
-    plt.plot(f, af, 'k-', label='Raw signal FFT')
-    plt.plot(f, afw, 'b-', label='FFT of Singal w. Blackman window')
+    plt.plot(f, af, label='Raw signal FFT')
+    plt.plot(f, afw, label='FFT of Singal w. Blackman window')
     plt.plot(fpeak, sqrt(pwr), 'ro')
     plt.xlabel('Frequency, Hz')
     plt.ylabel('Fourier amplitude')
