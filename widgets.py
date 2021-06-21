@@ -1,5 +1,6 @@
 from numbers import Number, Real, Integral
 from os import access, R_OK
+from matplotlib import backend_bases
 import numpy as np
 from math import pi
 from numpy.core.defchararray import _just_dispatcher
@@ -437,7 +438,6 @@ class DTNewScenarioDialog(tk.Toplevel):
                 return
             self.taskListbox.delete(selected[0])
 
-
 class DTTaskFrame(tk.Frame):
     def __init__(self, master, task: DTTask, state=None):
         """ Constructor for a task front-end.
@@ -492,30 +492,48 @@ class DTTaskFrame(tk.Frame):
         self.wpars = dict()
         self.valProc = self.register(self.__validateParameter)
 
+        sbstyle = ttk.Style()
+        sbstyle.configure('DT.TSpinbox', background=LIGHT_BG_COLOR, foreground=DEFAULT_FG_COLOR)
+        sbstyle.map('DT.TSpinbox', fieldbackground=[('focus', DARK_BG_COLOR), ('!disabled', DEFAULT_BG_COLOR)])
+
         irow = 0
         for par, value in self.task.parameters.items():
             if par not in dtParameterDesc:
                 continue
             self.paramFrame.rowconfigure(irow, pad=10)
-            partype = dtParameterDesc[par]['type']
-            tk.Label(self.paramFrame, text=dtParameterDesc[par][dtg.LANG]+':')\
-                .grid(row=irow, column=0, sticky=tk.E)
+            pardesc = dtParameterDesc[par]
+            tk.Label(self.paramFrame, text=pardesc[dtg.LANG]+':').grid(row=irow, column=0, sticky=tk.E)
 
-            if partype is Real:
+            if pardesc['type'] is Real:
                 self.parvars[par] = tk.DoubleVar()
-            elif dtParameterDesc[par]['type'] is Integral:
+            elif pardesc['type'] is Integral:
                 self.parvars[par] = tk.IntVar()
             else:
                 self.parvars[par] = tk.StringVar()
-            self.parvars[par].set(value)
 
-            entry = tk.Entry(self.paramFrame, textvariable=self.parvars[par], width=10,
-                             validate='key', validatecommand=(self.valProc, '%W', '%P'),
-                             justify=tk.RIGHT)
+            mult = dtg.units[pardesc['dunit']]['multiple']
+            dvalue = value / mult
+            dlowlim = pardesc['lowlim'] / mult
+            duplim = pardesc['uplim'] / mult
+            self.parvars[par].set(dvalue)
+
+            # entry = tk.Entry(self.paramFrame, textvariable=self.parvars[par], width=10,
+            #                 validate='key', validatecommand=(self.valProc, '%W', '%P'),
+            #                 justify=tk.RIGHT)
+
+            entry = ttk.Spinbox(self.paramFrame, textvariable=self.parvars[par])
+            entry.set(dvalue)
+            entry.configure(width=12, from_=dlowlim, to=duplim,
+                            justify=tk.RIGHT, format='%'+pardesc['format'], style='DT.TSpinbox')
+            if 'values' in pardesc:
+                entry.configure(values=pardesc['values'])
+            else:  # use increment
+                entry.configure(increment=pardesc['increment'] / mult)
+
             self.wpars[str(entry)] = par
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-            unit = dtg.units[dtParameterDesc[par]['dunit']][dtg.LANG]
+            unit = dtg.units[pardesc['dunit']][dtg.LANG]
             tk.Label(self.paramFrame, text=unit).grid(row=irow, column=2, sticky=tk.W)
 
             irow += 1
@@ -642,7 +660,8 @@ class DTTaskFrame(tk.Frame):
 
         # self.progress = 0
         for par in self.parvars:
-            self.task.parameters[par] = self.parvars[par].get()
+            value = self.parvars[par].get() * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+            self.task.parameters[par] = value
 
         self.after(100)
         self.task.init_meas()

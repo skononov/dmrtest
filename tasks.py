@@ -18,26 +18,26 @@ dtAllScenarios = None
 # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
 dtParameterDesc = {
     'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real,
-            'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB'},
+            'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB', 'format': '4.1f'},
     'avenum': {'ru': 'N точек усреднения', 'en': 'Averaging points', 'type': Integral,
-               'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1'},
+               'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1', 'format': '4.0f'},
     'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral,
-                'lowlim': 128, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1'},
+                'lowlim': 128, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1', 'format': '5.0f'},
     'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
-                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'Hz'},
+                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
     'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
-                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'Hz'},
+                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real,
-               'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%'},
+               'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
     'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
-               'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1'},
+               'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
     'refinl': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real,
-               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%'}
+               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'}
 }
 
 # dict for results desciption
 dtResultDesc = {
-    'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'kHz', 'format': '7.3f'},
+    'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'MHz', 'format': '10.6f'},
     'MODINFREQUENCY': {'ru': 'Вх. частота модуляции', 'en': 'Input mod. frequency', 'dunit': 'Hz', 'format': '5.0f'},
     'INPOWER': {'ru': 'Входная мощность', 'en': 'Input power', 'dunit': 'dBm', 'format': '5.1f'},
     'REFOUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
