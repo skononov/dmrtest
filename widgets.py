@@ -8,7 +8,8 @@ from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import tkinter as tk
-import tkinter.messagebox as tkmsg
+from tkinter import ttk
+# import tkinter.messagebox as tkmsg
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -29,7 +30,7 @@ mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["font.size"] = 12
 
 _rootWindowWidth = 1024
-_rootWindowHeight = 800
+_rootWindowHeight = 700
 
 DARK_BG_COLOR = '#0F0F0F'
 DEFAULT_BG_COLOR = '#1F1F1F'
@@ -81,11 +82,14 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.mainMenuFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
 
     def render(self, frame: tk.Frame):
-        if frame.winfo_ismapped() or frame.master is not self:
-            return
-        for child in self.winfo_children():
-            if not isinstance(child, tk.Toplevel):
-                child.grid_forget()
+        try:
+            if frame.winfo_ismapped() or frame.master is not self:
+                return
+            for child in self.winfo_children():
+                if not isinstance(child, tk.Toplevel):
+                    child.grid_forget()
+        except tk.TclError:
+            pass
         frame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
 
     def readStyle(self, filename: str):
@@ -99,9 +103,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_clear()
         self.option_add('*DTApplication.background', LIGHT_BG_COLOR)
         self.option_add('*background', DEFAULT_BG_COLOR)
-        self.option_add('*Text.background', DEFAULT_BG_COLOR)
         self.option_add('*Entry.background', DARK_BG_COLOR)
-        self.option_add('*Listbox.background', LIGHT_BG_COLOR)
+        self.option_add('*Listbox.background', DARK_BG_COLOR)
         self.option_add('*Button.background', BUTTON_BG_COLOR)
         self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
         self.option_add('*foreground', DEFAULT_FG_COLOR)
@@ -243,21 +246,35 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         self.columnconfigure(0, weight=3)
         self.columnconfigure(1, weight=1)
 
-        self.createLogoFrame()
+        self.__createLogoFrame()
         self.logoFrame.grid(column=0, row=0, sticky=tk.W+tk.E+tk.N+tk.S)
 
-        self.createMenuFrame()
+        self.__createMenuFrame()
         self.menuFrame.grid(column=1, row=0, sticky=tk.N+tk.S)
 
     def runScenario(self, scenario: DTScenario):
-        for task in scenario:
-            taskFrame = DTTaskFrame(self.master, task, inscenario=True)
+        if len(scenario) == 0:
+            raise DTInternalError('DTMainMenuFrame.runScenario()', f'Empty scenario {scenario.name}.')
+
+        index = 0
+        while True:
+            state = 'midthrough'
+            if index == 0:
+                state = 'first'
+            elif index == len(scenario)-1:
+                state = 'last'
+            taskFrame = DTTaskFrame(self.master, scenario[index], state=state)
             self.master.render(taskFrame)
             self.wait_window(taskFrame)
-            if taskFrame.gotoMainMenu:
-                del taskFrame
+            if taskFrame.direction == 0:
                 break
-            del taskFrame
+            elif taskFrame.direction == -1 and index > 0:
+                index -= 1
+                continue
+            index += 1
+            if index == len(scenario):
+                break
+        del taskFrame
         self.master.render(self)
 
     def newScenario(self):
@@ -276,13 +293,13 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         del taskFrame
         self.master.render(self)
 
-    def createLogoFrame(self):
+    def __createLogoFrame(self):
         self.logoFrame = tk.Frame(self, padx=10, pady=10, relief=tk.GROOVE)
         self.logoFrame.columnconfigure(0, weight=1)
         self.logoFrame.rowconfigure(0, weight=1)
         self.logoFrame.rowconfigure(1, weight=1)
 
-        tk.Label(self.logoFrame, image=self.master.logo, padx=5, pady=5).grid(row=0, sticky=tk.N)
+        tk.Label(self.logoFrame, image=self.master.logo).grid(row=0, sticky=tk.N, padx=10, pady=5)
 
         text = f"""
             Информация о приложении {__appname__} {__version__}.
@@ -302,7 +319,7 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         textbox.insert(tk.END, text, "normal")
         textbox.configure(state=tk.DISABLED)
 
-    def createMenuFrame(self):
+    def __createMenuFrame(self):
         self.menuFrame = tk.Frame(self, padx=10, pady=10)
 
         for i in range(1, 5):
@@ -422,28 +439,43 @@ class DTNewScenarioDialog(tk.Toplevel):
 
 
 class DTTaskFrame(tk.Frame):
-    def __init__(self, master, task: DTTask, inscenario=False):
+    def __init__(self, master, task: DTTask, state=None):
+        """ Constructor for a task front-end.
+            state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
+        """
         super().__init__(master, class_='DTTaskFrame')
         self.task = task
-        self.inscenario = inscenario
-        self.gotoMainMenu = False
+        self.state = state
+        self.direction = None
 
-        self.createWidgets()
+        self.__createWidgets()
 
-    def createWidgets(self):
-        self.configure(padx=20, pady=20)
-        self.rowconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1, minsize=550)
-        self.columnconfigure(0, weight=1, minsize=550)
-        self.columnconfigure(1, weight=1, minsize=300)
+    def __createWidgets(self):
+        self.lw = int(0.6*_rootWindowWidth)
+        self.rw = _rootWindowWidth-self.lw
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1, minsize=self.lw)
+        self.columnconfigure(1, weight=1, minsize=self.rw)
 
-        self.titleLabel = tk.Label(self, text=self.task.name[dtg.LANG])
-        self.titleLabel.configure(relief=tk.GROOVE, bd=3, height=2)
-        self.titleLabel.grid(row=0, columnspan=2, sticky=tk.W+tk.E+tk.N)
+        tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE, bg=LIGHT_BG_COLOR, borderwidth=3)\
+            .grid(row=0, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E+tk.N)
 
+        self.leftFrame = tk.Frame(self, padx=10, pady=20)
+        self.leftFrame.columnconfigure(0, weight=1, minsize=self.lw-20)
+        self.leftFrame.rowconfigure(1, weight=1)
+        self.leftFrame.grid(row=1, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
+
+        self.rightFrame = tk.Frame(self, padx=10, pady=20)
+        self.rightFrame.columnconfigure(0, weight=1, minsize=self.rw-20)
+        self.rightFrame.rowconfigure(2, weight=1)
+        self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
+
+        self.stopped = tk.IntVar()
+
+        self.__createStatusFrame()
+        self.__createMenu()
         self.__createParameters()
         self.__createResults()
-        self.__createMenu()
 
     def __validateParameter(self, where, what):
         print('Validating:', where, what)
@@ -451,29 +483,14 @@ class DTTaskFrame(tk.Frame):
             return tasks.DTTask.check_parameter(self.wpars[where], what)
         return False
 
-    def __createMenu(self):
-        self.menuFrame = tk.Frame(self)
-        self.menuFrame.grid(row=2, column=1, sticky=tk.SE)
-
-        self.startButton = tk.Button(self.menuFrame, text='Начать', command=self.runTask)
-        self.startButton.configure(bg='#21903A', width=20)
-        self.startButton.grid(row=0, column=0, sticky=tk.E, pady=10)
-
-        if self.inscenario:
-            tk.Button(self.menuFrame, text='Следующее измерение', command=self.destroy, width=20).\
-                grid(row=1, column=0, sticky=tk.E, pady=10)
-
-        tk.Button(self.menuFrame, text='Главное меню', command=self.mainMenu, width=20).\
-            grid(row=2, column=0, sticky=tk.E, pady=10)
-
     def __createParameters(self):
-        self.paramFrame = tk.LabelFrame(self, text="ПАРАМЕТРЫ")
-        self.paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE)
-        self.paramFrame.grid(row=1, column=1, sticky=tk.NE)
+        self.paramFrame = tk.LabelFrame(self.rightFrame, text="ПАРАМЕТРЫ")
+        self.paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        self.paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
 
         self.parvars = dict()
         self.wpars = dict()
-        valProc = self.register(self.__validateParameter)
+        self.valProc = self.register(self.__validateParameter)
 
         irow = 0
         for par, value in self.task.parameters.items():
@@ -493,7 +510,8 @@ class DTTaskFrame(tk.Frame):
             self.parvars[par].set(value)
 
             entry = tk.Entry(self.paramFrame, textvariable=self.parvars[par], width=10,
-                             validate='all', validatecommand=(valProc, '%W', '%P'), justify=tk.RIGHT)
+                             validate='key', validatecommand=(self.valProc, '%W', '%P'),
+                             justify=tk.RIGHT)
             self.wpars[str(entry)] = par
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
@@ -503,15 +521,13 @@ class DTTaskFrame(tk.Frame):
             irow += 1
 
     def __createResults(self):
-        self.resultFrame = tk.LabelFrame(self, text="РЕЗУЛЬТАТЫ")
-        self.resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE)
-        self.resultFrame.grid(row=1, column=0, sticky=tk.W+tk.E+tk.N)
+        self.resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
+        self.resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        self.resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        if isinstance(self.task, tasks.DTMeasureCarrierFrequency) or\
-           isinstance(self.task, tasks.DTMeasureNonlinearity) or\
-           isinstance(self.task, tasks.DTMeasureSensitivity):
-            self.plotFrame = DTPlotFrame(self)
-            self.plotFrame.grid(row=2, column=0, sticky=tk.W+tk.E+tk.S)
+        if not self.task.single:
+            self.plotFrame = DTPlotFrame(self.leftFrame)
+            self.plotFrame.grid(row=1, sticky=tk.S)
 
         self.resvars = dict()
 
@@ -537,19 +553,60 @@ class DTTaskFrame(tk.Frame):
 
             irow += 1
 
-        self.resultRows = irow
-        self.message = tk.Message(self.resultFrame, justify=tk.LEFT, width=400)
-        self.stopped = tk.IntVar()
+        self.__update()
 
-        self.update()
+    def __createStatusFrame(self):
+        self.statusFrame = tk.Frame(self.rightFrame, padx=5, pady=5, relief=tk.GROOVE, borderwidth=3)
+        self.statusFrame.grid(row=1, sticky=tk.W+tk.E+tk.N, pady=5)
 
-    def update(self):
+        # progressStyle = ttk.Style()
+        # progressStyle.configure('DT.Horizontal.TProgressbar', background='green')
+        # self.progressBar = ttk.Progressbar(self.statusFrame)
+        # self.progressBar.configure(length=self.rw-40, mode='indeterminate', orient=tk.HORIZONTAL,
+        #                            style='DT.Horizontal.TProgressbar')
+
+        self.message = tk.Message(self.statusFrame, justify=tk.LEFT, width=self.rw-40)
+        self.message.grid()
+        self.maxProgressLen = int((self.rw-40)/16)
+        self.progress = -1
+
+    def __createMenu(self):
+        self.menuFrame = tk.Frame(self.rightFrame)
+        self.menuFrame.grid(row=2, sticky=tk.SE)
+
+        self.startButton = tk.Button(self.menuFrame, width=20)
+        self.__stopTask()  # configures actual text, color and command
+        self.startButton.grid(row=0, columnspan=2, sticky=tk.W+tk.E, pady=10)
+        self.startButton.focus()
+
+        if self.state is not None:
+            navFrame = tk.Frame(self.menuFrame)
+            navFrame.grid(row=1, pady=10, sticky=tk.W+tk.E)
+            navFrame.columnconfigure(0, weight=1)
+            navFrame.columnconfigure(1, weight=1)
+            prevBtn = tk.Button(self.menuFrame, text='< Пред.', command=self.__goPrev)
+            prevBtn.grid(row=1, column=0, sticky=tk.W+tk.E)
+            if self.state == 'first':
+                prevBtn.configure(state=tk.DISABLED)
+            nextBtn = tk.Button(self.menuFrame, text='След. >', command=self.__goNext)
+            nextBtn.grid(row=1, column=1, sticky=tk.W+tk.E)
+            if self.state == 'last':
+                nextBtn.configure(state=tk.DISABLED)
+
+        tk.Button(self.menuFrame, text='Главное меню', command=self.__goMainMenu).\
+            grid(row=2, columnspan=2, sticky=tk.W+tk.E, pady=10)
+
+    def __update(self):
         if self.task.failed and self.task.message != '':
             self.message['text'] = self.task.message
-            self.message.grid(row=self.resultRows, columnspan=3)
+            self.message['fg'] = 'red'
             return
+        elif self.task.single and self.task.completed:
+            self.message['text'] = 'ЗАВЕРШЕНО'
+            self.message['fg'] = 'green'
         else:
-            self.message.grid_forget()
+            self.message['fg'] = 'green'
+            self.__stepProgress()
 
         for res, value in self.task.results.items():
             if res not in self.resvars:
@@ -564,41 +621,54 @@ class DTTaskFrame(tk.Frame):
         if 'IFFT' in self.task.results and self.task.results['IFFT'] is not None and self.plotFrame is not None:
             y = self.task.results['IFFT']
             x = rfftfreq(y.size, 1/dtg.adcSampleFrequency)
-            self.plotFrame.plotGraph(x, y,
+            self.plotFrame.plotGraph(x, y, new=True,
                                      labelx=('Частота, Гц' if dtg.LANG == 'ru' else 'Frequency, Hz'),
                                      labely=('Амплитуда' if dtg.LANG == 'ru' else 'Amplitude'))
 
-    def measure(self):
+    def __stepProgress(self):
+        self.progress = (self.progress+1) % self.maxProgressLen
+        self.message['text'] = '\u2588' * self.progress
+
+    def __measure(self):
         self.task.measure()
-        self.update()
+        self.__update()
         if self.task.completed:
             self.stopped.set(0)
         else:
-            self.stopTask()
+            self.__stopTask()
 
-    def runTask(self):
-        self.startButton.configure(text='Остановить', command=self.stopTask, bg='#A10D0D')
+    def __runTask(self):
+        self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A10D0D')
 
+        # self.progress = 0
         for par in self.parvars:
             self.task.parameters[par] = self.parvars[par].get()
 
         self.after(100)
         self.task.init_meas()
-        if self.task.failed or self.task.single:
-            self.update()
-            self.stopTask()
+        self.__update()
+        if self.task.failed or self.task.completed:
+            self.__stopTask()
             return
 
         self.stopped.set(0)
         while self.stopped.get() == 0:
-            self.after(10, self.measure)
+            self.after(10, self.__measure)
             self.wait_variable(self.stopped)
 
-    def stopTask(self):
+    def __stopTask(self):
         self.stopped.set(1)
-        self.startButton.configure(text='Начать', command=self.runTask, bg='#21903A')
+        self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A')
 
-    def mainMenu(self):
-        self.stopTask()
-        self.gotoMainMenu = True
+    def __goPrev(self):
+        self.direction = -1
+        self.destroy()
+
+    def __goNext(self):
+        self.direction = 1
+        self.destroy()
+
+    def __goMainMenu(self):
+        self.__stopTask()
+        self.direction = 0
         self.destroy()

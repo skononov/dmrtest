@@ -17,25 +17,27 @@ dtAllScenarios = None
 
 # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
 dtParameterDesc = {
-    'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real, 'lowlim': 0.5, 'uplim': 31.5, 'dunit': 'dB'},
-    'avenum': {'ru': 'Точек усреднения', 'en': 'Averaging points', 'type': Integral,
-               'lowlim': 1, 'uplim': 4096, 'dunit': '1'},
-    'datanum': {'ru': 'Точек АЦП', 'en': 'ADC points', 'type': Integral, 'lowlim': 16, 'uplim': 16384, 'dunit': '1'},
+    'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real,
+            'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB'},
+    'avenum': {'ru': 'N точек усреднения', 'en': 'Averaging points', 'type': Integral,
+               'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1'},
+    'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral,
+                'lowlim': 128, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1'},
     'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
-                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'dunit': 'Hz'},
+                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'Hz'},
     'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
-                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'dunit': 'Hz'},
-    'modamp': {'ru': 'Амлитуда модуляции', 'en': 'Modulating amplitude', 'type': Integral,
-               'lowlim': 0, 'uplim': 0xFFFF, 'dunit': '1'},
+                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'Hz'},
+    'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real,
+               'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%'},
     'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
-               'lowlim': 100, 'uplim': 2000, 'dunit': '1'},
+               'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1'},
     'refinl': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real,
-               'lowlim': 0.1, 'uplim': 100, 'dunit': '%'}
+               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%'}
 }
 
 # dict for results desciption
 dtResultDesc = {
-    'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'MHz', 'format': '7.3f'},
+    'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'kHz', 'format': '7.3f'},
     'MODINFREQUENCY': {'ru': 'Вх. частота модуляции', 'en': 'Input mod. frequency', 'dunit': 'Hz', 'format': '5.0f'},
     'INPOWER': {'ru': 'Входная мощность', 'en': 'Input power', 'dunit': 'dBm', 'format': '5.1f'},
     'REFOUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
@@ -73,14 +75,19 @@ class DTTask:
         self.failed = False  # if last task call is failed
         self.completed = False  # if task is successfully completed
         self.single = False
+        self.com = None
 
     def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device for the task.
         """
-        if 'test' not in kwargs:
-            self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         self.failed = self.completed = False
         self.message = ''
+        try:
+            self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
+        except DTComError as exc:
+            if 'test' not in kwargs:
+                self.set_com_error(exc)
+            return self
         for par in kwargs:
             if par in self.parameters:
                 self.parameters[par] = kwargs[par]
@@ -113,9 +120,11 @@ class DTTask:
         for par in self.parameters:
             if par in dtParameterDesc:
                 pardata = dtParameterDesc[par]
-                ok = ok and self.check_parameter(par, self.parameters[par])
-                self.message += ('\n' if self.message != '' else '') + pardata[dtg.LANG] +\
-                    (' вне диапазона или неверного типа' if dtg.LANG == 'ru' else ' out of range or of invalid type')
+                check = self.check_parameter(par, self.parameters[par])
+                ok = ok and check
+                if not check:
+                    self.message += ('\n' if self.message != '' else '') + pardata[dtg.LANG] +\
+                        (' вне диапазона' if dtg.LANG == 'ru' else ' out of range')
 
         return ok
 
@@ -148,7 +157,10 @@ class DTTask:
     def set_com_error(self, exc: DTComError):
         self.failed = True
         self.completed = False
-        self.message = ('Ошибка связи с устройством:\n' if dtg.LANG == 'ru' else 'Communication error:\n') + exc
+        strexc = str(exc)
+        self.message = ('Ошибка связи с устройством:\n' if dtg.LANG == 'ru' else 'Communication error:\n') + strexc
+        if 'MCU BUSY' in strexc:
+            self.message += '\nПерезагрузите устройство.'
 
     def set_status_error(self, status: int):
         self.failed = True
@@ -173,6 +185,8 @@ class DTCalibrate(DTTask):
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
+        if self.failed:
+            return self
 
         try:
             self.com.command('SET MEASST', 1)
@@ -229,7 +243,7 @@ class DTMeasurePower(DTTask):
             return self
 
         try:
-            pwrs = self.com.command('GET PWR', self.parameters['AVENUM'], nreply=2)
+            pwrs = self.com.command('GET PWR', self.parameters['avenum'], nreply=2)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -278,7 +292,7 @@ class DTMeasureCarrierFrequency(DTTask):
 
         self.foffset0 = self.foffset = 0
         try:
-            isset, self.foffset0 = self.com.set_pll_freq(self.parameters['frequency'])
+            isset, self.foffset0 = self.com.set_pll_freq(2, self.parameters['frequency'])
             if not isset:
                 self.set_pll_error()
                 return self
@@ -287,7 +301,7 @@ class DTMeasureCarrierFrequency(DTTask):
             # reading ADC data 1st time
             self.buffer0 = self.com.command('GET ADC DAT', [1, bsize], nreply=bsize)
 
-            isset, self.foffset = self.com.set_pll_freq(self.parameters['frequency'] + self.nominalCarrierOffset)
+            isset, self.foffset = self.com.set_pll_freq(2, self.parameters['frequency'] + self.nominalCarrierOffset)
             if not isset:
                 self.set_pll_error()
                 return self
@@ -345,10 +359,10 @@ class DTMeasureNonlinearity(DTTask):
     """
     name = dict(ru='Измерение КНИ', en='THD measurement')
 
-    def __init__(self, frequency: int = 200*MHz, modamp: int = 0xFF, modfreq: int = 10*kHz, datanum: int = 16384):
+    def __init__(self, frequency: int = 200*MHz, modamp: int = 50, modfreq: int = 10*kHz, datanum: int = 16384):
         super().__init__()
         self.parameters['frequency'] = int(frequency)
-        self.parameters['modamp'] = int(modamp)
+        self.parameters['modamp'] = float(modamp)
         self.parameters['modfreq'] = int(modfreq)
         self.parameters['datanum'] = int(datanum)
 
@@ -361,17 +375,18 @@ class DTMeasureNonlinearity(DTTask):
         if self.failed:
             return self
 
+        macode = int(self.parameters['modamp']/100*0xFFFF)
         mfcode = int(self.parameters['modfrequency']*120*kHz/(1 << 16)+0.5)
 
         self.foffset = 0
         try:
             self.com.command('SET MEASST', 2)
-            isset, self.foffset = self.com.set_pll_freq(self.parameters['frequency'])
+            isset, self.foffset = self.com.set_pll_freq(2, self.parameters['frequency'])
             if not isset:
                 self.set_pll_error()
                 return self
 
-            self.com.command('SET LFDAC', [self.parameters['modamp'], mfcode], owordsize=[2, 4])
+            self.com.command('SET LFDAC', [macode, mfcode], owordsize=[2, 4])
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -591,7 +606,6 @@ class DTDMROutput(DTTask):
         super().__init__()
         self.parameters['frequency'] = int(frequency)
         self.parameters['att'] = int(att)
-
         self.single = True
 
     def init_meas(self, **kwargs):
@@ -601,7 +615,7 @@ class DTDMROutput(DTTask):
 
         try:
             self.com.command('SET MEASST', 5)
-            isset, foffset = self.com.set_pll_freq(self.parameters['frequency'])
+            isset, foffset = self.com.set_pll_freq(1, self.parameters['frequency'])
             if not isset:
                 self.set_pll_error()
                 return self
@@ -648,7 +662,7 @@ class DTMeasureSensitivity(DTTask):
             # set DAC to 80% of maximum amplitude and zero frequency
             self.com.command('SET LFDAC', [52400, 0], owordsize=[2, 4])
 
-            isset, foffset = self.com.set_pll_freq(self.parameters['frequency'] + self.parameters['modfrequency'])
+            isset, foffset = self.com.set_pll_freq(1, self.parameters['frequency'] + self.parameters['modfrequency'])
             if not isset:
                 self.set_pll_error()
                 return self
@@ -822,8 +836,23 @@ class DTScenario:
     def __getitem__(self, key):
         return self.tasks[key]
 
+    def __len__(self):
+        return len(self.tasks)
+
     def __iter__(self):
-        return iter(self.tasks)
+        """Initialize iterator with previous and current tasks
+        """
+        self.__prevtask = None
+        self.__curtask = None
+        self.__taskiter = iter(self.tasks)
+        return self.__taskiter
+
+    def __next__(self):
+        """Iterate returning previous and current tasks as a tuple
+        """
+        self.__prevtask = self.__curtask
+        self.__curtask = next(self.__taskiter)
+        return (self.__prevtask, self.__curtask)
 
     def __repr__(self):
         return '%s("%s")' % (DTScenario.__name__, self.name)

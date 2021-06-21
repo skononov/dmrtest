@@ -18,6 +18,7 @@ units = {
     'V': dict(multiple=1, quantity='voltage', ru='В', en='V'),
     'mW': dict(multiple=1, quantity='power', ru='мВт', en='mW'),
     'W': dict(multiple=1000, quantity='power', ru='мВт', en='mW'),
+    'dB': dict(multiple=1, quantity='attenuation', ru='дБ', en='dB'),
     'dBm': dict(multiple=1, quantity='logpower', ru='дБм', en='dBm'),
     '%': dict(multiple=1, quantity='fraction', ru='%', en='%'),
     '1': dict(multiple=1, quantity='dimensionless', ru='', en='')
