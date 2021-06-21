@@ -1,19 +1,18 @@
 from numbers import Number, Real, Integral
 from os import access, R_OK
-from matplotlib import backend_bases
 import numpy as np
 from math import pi
-from numpy.core.defchararray import _just_dispatcher
-from numpy.lib.arraysetops import isin
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import tkinter as tk
-from tkinter import ttk
+from tkinter import Tcl, TclError, ttk
 # import tkinter.messagebox as tkmsg
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+from threading import Thread, Event
 
 from dtexcept import DTInternalError
 from config import DTConfiguration, __appname__, __version__
@@ -438,6 +437,47 @@ class DTNewScenarioDialog(tk.Toplevel):
                 return
             self.taskListbox.delete(selected[0])
 
+
+class DTThread(Thread):
+    def __init__(self, task: DTTask, timeout=0.1):
+        super().__init__()
+        self.task = task
+        self.timeout = timeout
+        self.__updated = Event()
+        self.__tostop = Event()
+
+    def run(self):
+        self.__updated.clear()
+        self.__tostop.clear()
+
+        self.task.init_meas()
+        self.__updated.set()
+        if self.task.failed or self.task.completed:
+            #print('Thread is about to stop after init')
+            return
+
+        while not self.__tostop.is_set():
+            self.task.measure()
+            self.__updated.set()
+            if self.task.failed:
+                break
+
+        #print('Thread is about to stop')
+
+    def inc_wait_update(self):
+        return self.__updated.wait(self.timeout)
+
+    def is_updated(self):
+        return self.__updated.is_set()
+
+    def clear_updated(self):
+        return self.__updated.clear()
+
+    def signal_stop(self):
+        print('Thread stop signalled')
+        self.__tostop.set()
+
+
 class DTTaskFrame(tk.Frame):
     def __init__(self, master, task: DTTask, state=None):
         """ Constructor for a task front-end.
@@ -470,6 +510,7 @@ class DTTaskFrame(tk.Frame):
         self.rightFrame.rowconfigure(2, weight=1)
         self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
 
+        self.tostop = tk.IntVar()
         self.stopped = tk.IntVar()
 
         self.__createStatusFrame()
@@ -616,14 +657,12 @@ class DTTaskFrame(tk.Frame):
 
     def __update(self):
         if self.task.failed and self.task.message != '':
-            self.message['text'] = self.task.message
-            self.message['fg'] = 'red'
+            self.message.configure(text=self.task.message, foreground='red')
             return
         elif self.task.single and self.task.completed:
-            self.message['text'] = 'ЗАВЕРШЕНО'
-            self.message['fg'] = 'green'
+            self.message.configure(text='ЗАВЕРШЕНО', foreground='green')
         else:
-            self.message['fg'] = 'green'
+            self.message.configure(foreground='green')
             self.__stepProgress()
 
         for res, value in self.task.results.items():
@@ -647,14 +686,6 @@ class DTTaskFrame(tk.Frame):
         self.progress = (self.progress+1) % self.maxProgressLen
         self.message['text'] = '\u2588' * self.progress
 
-    def __measure(self):
-        self.task.measure()
-        self.__update()
-        if self.task.completed:
-            self.stopped.set(0)
-        else:
-            self.__stopTask()
-
     def __runTask(self):
         self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A10D0D')
 
@@ -663,31 +694,49 @@ class DTTaskFrame(tk.Frame):
             value = self.parvars[par].get() * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
             self.task.parameters[par] = value
 
-        self.after(100)
-        self.task.init_meas()
-        self.__update()
-        if self.task.failed or self.task.completed:
-            self.__stopTask()
-            return
+        self.thread = DTThread(self.task, timeout=0.1)
 
-        self.stopped.set(0)
-        while self.stopped.get() == 0:
-            self.after(10, self.__measure)
-            self.wait_variable(self.stopped)
+        self.thread.start()
+
+        self.tostop.set(0)
+        while self.tostop.get() == 0 and self.thread.is_alive():
+            #print("Update cycle 1")
+            while not self.thread.inc_wait_update() and self.thread.is_alive() and self.tostop.get() == 0:
+                #print("  Update cycle 2")
+                self.update()
+            try:
+                self.__update()
+            except TclError:
+                break
+            self.thread.clear_updated()
+
+        self.__stopTask()
+        self.__finishTask()
+
+    def __finishTask(self):
+        if hasattr(self, 'thread') and self.thread.is_alive():
+            #print('Await task stop')
+            self.thread.signal_stop()
+            self.thread.join()
 
     def __stopTask(self):
-        self.stopped.set(1)
-        self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A')
+        self.tostop.set(1)
+        try:
+            self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A')
+        except TclError:
+            pass
 
     def __goPrev(self):
         self.direction = -1
+        self.__finishTask()
         self.destroy()
 
     def __goNext(self):
         self.direction = 1
+        self.__finishTask()
         self.destroy()
 
     def __goMainMenu(self):
-        self.__stopTask()
         self.direction = 0
+        self.__finishTask()
         self.destroy()

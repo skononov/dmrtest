@@ -789,20 +789,22 @@ class DTTest(DTTask):
         self.parameters['datanum'] = int(datanum)
         self.results['CARRIER FREQUENCY'] = None
         self.rng = np.random.default_rng()
+        self.counter = 0
 
     def init_meas(self, **kwargs):
         super().init_meas(test=True, **kwargs)
         if self.failed:
-            return self
-        sleep(0.2)
-        print('Task initialized')
+            return
+        sleep(0.5)
+        print('Task initialized', self.parameters)
         return self
 
     def measure(self):
-        sleep(0.3)
-        self.results['CARRIER FREQUENCY'] = self.rng.normal(self.parameters['frequency'], MHz)
+        sleep(1)
+        self.results['CARRIER FREQUENCY'] = int(self.rng.normal(self.parameters['frequency'], MHz))
         self.set_success()
-        print('Measured')
+        self.counter += 1
+        print(f'Measured {self.counter}:', self.results)
         return self
 
 
