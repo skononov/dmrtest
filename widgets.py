@@ -2,11 +2,13 @@ from numbers import Number, Real, Integral
 from os import access, R_OK
 import numpy as np
 from math import pi
+from numpy.core.fromnumeric import var
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from time import perf_counter
 import tkinter as tk
-from tkinter import Tcl, TclError, ttk
+from tkinter import TclError, ttk
 # import tkinter.messagebox as tkmsg
 
 from matplotlib.figure import Figure
@@ -177,7 +179,7 @@ class DTChooseObjectMenu(tk.Menu):
             self.optVar = tk.StringVar()
             for name, obj in self.objects.items():
                 self.add_radiobutton(label=name, indicatoron=False,
-                                     value=name, variable=self.optVar, command=self.select)
+                                     value=name, variable=self.optVar, command=self.__select)
         else:
             obj = next(iter(self.objects))
             if hasattr(obj, 'name') and isinstance(obj.name, dict) and dtg.LANG in obj.name:
@@ -189,9 +191,9 @@ class DTChooseObjectMenu(tk.Menu):
             self.optVar = tk.IntVar()
             for index, obj in enumerate(self.objects):
                 self.add_radiobutton(label=obj.name[dtg.LANG] if locName else obj.name, indicatoron=False,
-                                     value=index, variable=self.optVar, command=self.select)
+                                     value=index, variable=self.optVar, command=self.__select)
 
-    def select(self):
+    def __select(self):
         opt = self.optVar.get()
         self.forget()
         if self.isSubscriptable:
@@ -222,16 +224,22 @@ class DTPlotFrame(tk.Frame):
         self.plotGraph(x, y)
 
     def plotGraph(self, x, y, new=True, labelx=None, labely=None):
-        ax = self.figure.axes
-        if new or ax is None:
+        self.axes = self.figure.axes
+        if new or self.axes is None:
             self.figure.clf()
-            ax = self.figure.add_subplot(111)
-        ax.plot(x, y, 'w')
+            self.axes = self.figure.add_subplot(111)
+        self.hlines, = self.axes.plot(x, y, 'w')
         if labelx:
-            ax.set_xlabel(labelx)
+            self.axes.set_xlabel(labelx)
         if labely:
-            ax.set_ylabel(labely)
-        ax.grid(self.gridOn, 'major')
+            self.axes.set_ylabel(labely)
+        self.axes.grid(self.gridOn, 'major')
+
+    def updateGraph(self, x, y):
+        if hasattr(self, 'hlines'):
+            self.hlines.set_xdata(x)
+            self.hlines.set_ydata(y)
+            self.axes.redraw_in_frame()
 
     def clearCanvas(self):
         self.figure.clf()
@@ -474,7 +482,7 @@ class DTThread(Thread):
         return self.__updated.clear()
 
     def signal_stop(self):
-        print('Thread stop signalled')
+        #print('Thread stop signalled')
         self.__tostop.set()
 
 
@@ -487,6 +495,7 @@ class DTTaskFrame(tk.Frame):
         self.task = task
         self.state = state
         self.direction = None
+        self.resHistSize = 10000
 
         self.__createWidgets()
 
@@ -589,29 +598,44 @@ class DTTaskFrame(tk.Frame):
             self.plotFrame.grid(row=1, sticky=tk.S)
 
         self.resvars = dict()
+        self.resplotvar = tk.StringVar()
+        self.resvalues = dict()
 
         irow = 0
-        for res, value in self.task.results.items():
+        for res in self.task.results:
             self.resultFrame.rowconfigure(irow, pad=10)
-            if res not in dtResultDesc or not (isinstance(value, Number) or value is None):
+            if res in dtResultDesc:
+                name = dtResultDesc[res][dtg.LANG]
+                unit = dtg.units[dtResultDesc[res]['dunit']]
+                unitname = unit[dtg.LANG]
+
+                self.resvars[res] = tk.StringVar()
+                reslabel = tk.Label(self.resultFrame, textvariable=self.resvars[res])
+                reslabel.configure(relief=tk.SUNKEN, font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE, 'bold'),
+                                   padx=5, width=10, justify=tk.RIGHT)
+                reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
+
+                if unitname != '':
+                    tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
+                colspan = 1
+            elif res == 'IFFT' or res == 'QFFT':
+                name = res
+                colspan = 3
+            else:
                 continue
-            name = dtResultDesc[res][dtg.LANG]
-            unit = dtg.units[dtResultDesc[res]['dunit']]
-            unitname = unit[dtg.LANG]
 
-            tk.Label(self.resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, sticky=tk.E)
+            tk.Label(self.resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, columnspan=colspan, sticky=tk.E)
 
-            self.resvars[res] = tk.StringVar()
-            reslabel = tk.Label(self.resultFrame, textvariable=self.resvars[res])
-            reslabel.configure(relief=tk.SUNKEN, font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE),
-                               padx=5, width=10, justify=tk.RIGHT)
-            reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
+            rb = tk.Radiobutton(self.resultFrame, text='Рисовать')
+            rb.configure(indicatoron=0, value=res, variable=self.resplotvar, command=self.___plotResult,
+                         activeforeground=DEFAULT_FG_COLOR, fg=rb['bg'])
+            rb.grid(row=irow, column=3, padx=5)
 
-            if unitname != '':
-                tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
+            self.resvalues[res] = None
 
             irow += 1
 
+        self.__resetResHist()
         self.__update()
 
     def __createStatusFrame(self):
@@ -665,6 +689,10 @@ class DTTaskFrame(tk.Frame):
             self.message.configure(foreground='green')
             self.__stepProgress()
 
+        if self.startTime == 0.:
+            self.startTime = perf_counter()
+
+        self.times[self.npoints] = perf_counter() - self.startTime
         for res, value in self.task.results.items():
             if res not in self.resvars:
                 continue
@@ -672,11 +700,32 @@ class DTTaskFrame(tk.Frame):
             if value is not None:
                 value /= dtg.units[dtResultDesc[res]['dunit']]['multiple']
                 self.resvars[res].set(f'%{dtResultDesc[res]["format"]}' % value)
+                self.resvalues[res][self.npoints] = value
             else:
                 self.resvars[res].set('----')
 
-        if 'IFFT' in self.task.results and self.task.results['IFFT'] is not None and self.plotFrame is not None:
-            y = self.task.results['IFFT']
+        self.___plotResult()
+
+    def __resetResHist(self):
+        self.npoints = 0
+        self.startTime = 0.
+        self.times = np.zeros(self.resHistSize, dtype='float32')
+        for res in self.task.results:
+            if res not in dtResultDesc:
+                continue
+            self.resvalues[res] = np.zeros(self.resHistSize, dtype='float32')
+
+    def ___plotResult(self, update=False):
+        if self.npoints == 0:
+            return
+        res = self.resplotvar.get()
+        if res[-3:] != 'FFT':
+            x = self.times[:self.npoints]
+            y = self.resvalues[res][:self.npoints]
+            self.plotFrame.plotGraph(x, y, new=True, labelx=('Время, с' if dtg.LANG == 'ru' else 'Time, s'),
+                                     labely=dtResultDesc[res][dtg.LANG])
+        else:
+            y = self.task.results[res]
             x = rfftfreq(y.size, 1/dtg.adcSampleFrequency)
             self.plotFrame.plotGraph(x, y, new=True,
                                      labelx=('Частота, Гц' if dtg.LANG == 'ru' else 'Frequency, Hz'),
@@ -689,7 +738,8 @@ class DTTaskFrame(tk.Frame):
     def __runTask(self):
         self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A10D0D')
 
-        # self.progress = 0
+        self.progress = 0
+        self.__resetResHist()
         for par in self.parvars:
             value = self.parvars[par].get() * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
             self.task.parameters[par] = value
