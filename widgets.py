@@ -27,6 +27,7 @@ mpl.rcParams["grid.linewidth"] = 0.5
 mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["axes.xmargin"] = 0.0
 mpl.rcParams["font.size"] = 10
+mpl.rcParams["figure.autolayout"] = True
 
 _rootWindowWidth = 1024
 _rootWindowHeight = 700
@@ -34,10 +35,11 @@ _rootWindowHeight = 700
 DARK_BG_COLOR = '#0F0F0F'
 DEFAULT_BG_COLOR = '#1F1F1F'
 LIGHT_BG_COLOR = '#2E2E2E'
-HIGHLIGHTED_BG_COLOR = '#4F4F4F'
+LIGHTER_BG_COLOR = '#4E4E4E'
+HIGHLIGHT_COLOR = '#3C449D'
 SELECT_BG_COLOR = '#274F77'
 BUTTON_BG_COLOR = '#505050'
-DEFAULT_FG_COLOR = 'white'
+DEFAULT_FG_COLOR = '#EEEEEE'
 
 DEFAULT_FONT_FAMILY = "Helvetica"
 MONOSPACE_FONT_FAMILY = "lucidasanstypewriter"
@@ -100,15 +102,27 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
     def defaultStyle(self):
         self.option_clear()
-        self.option_add('*DTApplication.background', LIGHT_BG_COLOR)
         self.option_add('*background', DEFAULT_BG_COLOR)
+        self.option_add('*highlightBackground', DEFAULT_BG_COLOR)
+        self.option_add('*activeBackground', LIGHT_BG_COLOR)
+        self.option_add('*activeForeground', DEFAULT_FG_COLOR)
+        self.option_add('*selectColor', LIGHT_BG_COLOR)
+        self.option_add('*highlightThickness', '0')
+        self.option_add('*Button.highlightThickness', '2')
+        self.option_add('*Menubutton.highlightThickness', '2')
+        self.option_add('*Entry.highlightThickness', '2')
+        self.option_add('*Spinbox.highlightThickness', '2')
+        self.option_add('*Listbox.highlightThickness', '2')
         self.option_add('*Entry.background', DARK_BG_COLOR)
+        self.option_add('*Spinbox.background', DARK_BG_COLOR)
         self.option_add('*Listbox.background', DARK_BG_COLOR)
         self.option_add('*Button.background', BUTTON_BG_COLOR)
         self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
         self.option_add('*foreground', DEFAULT_FG_COLOR)
+        self.option_add('*highlightColor', HIGHLIGHT_COLOR)
         self.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
         self.option_add('*Entry.font', f'{MONOSPACE_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
+        self.option_add('*Spinbox.font', f'{MONOSPACE_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
 
         # self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
         # self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
@@ -204,7 +218,7 @@ class DTPlotFrame(tk.Frame):
     """ Widget for plotting results data with Matplotlib/TkAgg.
     """
     def __init__(self, master, figsize=None):
-        super().__init__(master, class_='DTPlotFrame')
+        super().__init__(master)
         self.figure = None
         self.gridOn = True
         self.createCanvas(figsize)
@@ -255,7 +269,6 @@ class DTPlotFrame(tk.Frame):
         if not hasattr(self, 'pkeys'):
             self.pkeys = None
         ckeys = tuple([k for k, r in results.items() if r['draw']])
-        print(ckeys)
         nres = len(ckeys)
         if self.pkeys != ckeys:
             # plot new
@@ -263,20 +276,24 @@ class DTPlotFrame(tk.Frame):
             self.figure.clf()
             if nres == 0:
                 return
-            self.figure.subplots(nres, 1, subplot_kw=dict(autoscale_on=True))
+
+            ntypes = len(set([r['type'] for r in results.values() if r['draw']]))
+            self.figure.subplots(nres, 1, sharex=(ntypes == 1), subplot_kw=dict(autoscale_on=True))
             axes = self.figure.axes
-            for ax, key in zip(axes, ckeys):
+            for i, (ax, key) in enumerate(zip(axes, ckeys)):
                 result = results[key]
                 if result['type'] == 'time':
                     n = result['n']
                     ax.plot(result['x'][:n], result['y'][:n])
-                    ax.set_xlabel('Время [с]' if dtg.LANG == 'ru' else 'Time [s]')
+                    if ntypes == 1 and i == nres-1 or ntypes > 1:
+                        ax.set_xlabel('Время [с]' if dtg.LANG == 'ru' else 'Time [s]')
                     yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
                     ax.set_ylabel(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
                     ax.set_xlim(0, max(result['x'][n-1]+1, 10))
                 else:
                     ax.plot(result['x'], result['y'])
-                    ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
+                    if ntypes == 1 and i == nres-1 or ntypes > 1:
+                        ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
                     ax.set_ylabel(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
                 ax.grid(self.gridOn, 'major')
         else:
@@ -303,7 +320,7 @@ class DTPlotFrame(tk.Frame):
 class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
 
     def __init__(self, master):
-        super().__init__(master, class_='DTMainMenuWindow')
+        super().__init__(master)
         self.configure(padx=10, pady=10)
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=3)
@@ -342,6 +359,7 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
 
     def __newScenario(self):
         dialog = DTNewScenarioDialog(self.master)
+        dialog.grab_set()
         self.wait_window(dialog)
         nscenarios = len(tasks.dtAllScenarios)
         if nscenarios > 0:
@@ -394,21 +412,22 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         self.scenariosText.set(f'{len(tasks.dtAllScenarios)} сценариев определено')
         tk.Label(self.menuFrame, textvariable=self.scenariosText).grid(row=0)
 
-        csmb = self.runScenarioMB = tk.Menubutton(self.menuFrame, text='Запустить сценарий', takefocus=True)
-        csmb.configure(relief=tk.RAISED, height=2)
+        csmb = self.runScenarioMB = tk.Menubutton(self.menuFrame, text='Запустить сценарий')
+        csmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
         if len(tasks.dtAllScenarios) == 0:
             csmb['state'] = tk.DISABLED
         csmb.grid(row=1, sticky=tk.W+tk.E)
         csmb['menu'] = csmb.menu = DTChooseObjectMenu(csmb, command=self.__runScenario,
                                                       objects=tasks.dtAllScenarios)
 
-        cmmb = tk.Menubutton(self.menuFrame, text='Выбрать измерение', takefocus=True)
-        cmmb.configure(relief=tk.RAISED, height=2)
+        cmmb = tk.Menubutton(self.menuFrame, text='Выбрать измерение')
+        cmmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
         cmmb['menu'] = cmmb.menu = DTChooseObjectMenu(cmmb, command=self.__chooseTask,
                                                       objects=tasks.dtTaskTypes)
         cmmb.grid(row=2, sticky=tk.W+tk.E)
 
-        csb = tk.Button(self.menuFrame, text='Создать сценарий', command=self.__newScenario, height=2)
+        csb = tk.Button(self.menuFrame, text='Создать сценарий')
+        csb.configure(command=self.__newScenario, height=2, highlightthickness=2)
         csb.grid(row=3, sticky=tk.W+tk.E)
         csb.focus()
 
@@ -420,11 +439,11 @@ class DTNewScenarioDialog(tk.Toplevel):
 
     def __init__(self, master=None):
         super().__init__(master)
-        self.grab_set()
         x0, y0 = master.winfo_rootx(), master.winfo_rooty()
         self.geometry(f'{x0+200:+d}{y0:+d}')
         self.title('Создать сценарий')
-        self.configure(padx=10, pady=10)
+        self.configure(padx=20, pady=10)
+        self.bind('<Key-Escape>', self.__close)
 
         for irow in range(4):
             self.rowconfigure(irow, pad=10)
@@ -432,12 +451,12 @@ class DTNewScenarioDialog(tk.Toplevel):
         self.columnconfigure(1, pad=10)
         self.columnconfigure(2, pad=0)
 
-        tk.Label(self, text='Название:').grid(column=0, row=0, sticky=tk.E, padx=10, pady=5)
+        tk.Label(self, text='Имя:').grid(column=0, row=0, sticky=tk.E, padx=10, pady=5)
 
         self.nameVar = tk.StringVar()
         self.nameVar.set(self.__newName())
-        nameEntry = tk.Entry(self, textvariable=self.nameVar, width=38)
-        nameEntry.grid(column=1, row=0, sticky=tk.N+tk.S, pady=5)
+        nameEntry = tk.Entry(self, textvariable=self.nameVar, width=35)
+        nameEntry.grid(column=1, row=0, sticky=tk.W+tk.E)
         nameEntry.focus()
 
         tk.Label(self, text='Задачи:').grid(column=0, row=1, sticky=tk.NE, padx=10, pady=5)
@@ -445,19 +464,22 @@ class DTNewScenarioDialog(tk.Toplevel):
         self.yTaskScroll = tk.Scrollbar(self, orient=tk.VERTICAL)
         self.yTaskScroll.grid(column=2, row=1, sticky=tk.N+tk.S+tk.W)
         self.taskListVar = tk.StringVar()
-        self.taskListbox = tk.Listbox(self, height=10, width=38, selectmode=tk.SINGLE, listvariable=self.taskListVar)
+        self.taskListbox = tk.Listbox(self, height=10, selectmode=tk.SINGLE, listvariable=self.taskListVar)
         self.taskListbox['yscrollcommand'] = self.yTaskScroll.set
         self.yTaskScroll['command'] = self.taskListbox.yview
-        self.taskListbox.grid(column=1, row=1, sticky=tk.N+tk.S, pady=5)
+        self.taskListbox.grid(column=1, row=1, sticky=tk.N+tk.S+tk.W+tk.E, pady=5)
         self.taskListbox.bind('<Key-Delete>', self.__deleteTask)
 
         menubtn = tk.Menubutton(self, text='Добавить', relief=tk.RAISED, takefocus=True, width=30)
         menubtn['menu'] = menubtn.menu = DTChooseObjectMenu(menubtn, command=self.__addTask, objects=tasks.dtTaskTypes)
-        menubtn.grid(column=1, row=2, sticky=tk.N, pady=5)
+        menubtn.grid(column=1, row=2, sticky=tk.NW, pady=5)
 
         tk.Button(self, text='Создать сценарий', command=self.__create).grid(column=1, row=3, sticky=tk.E)
 
         tk.Button(self, text='Отмена', command=self.destroy).grid(column=0, row=3, sticky=tk.W)
+
+    def __close(self, event):
+        self.destroy()
 
     def __create(self):
         if self.taskListbox.size() == 0:
@@ -501,10 +523,6 @@ class DTNewScenarioDialog(tk.Toplevel):
                 return
             self.taskListbox.delete(selected[0])
 
-    def destroy(self):
-        self.grab_release()
-        return super().destroy()
-
 
 class DTThread(Thread):
     def __init__(self, task: DTTask):
@@ -514,14 +532,14 @@ class DTThread(Thread):
         self.__tostop = Event()
 
     def run(self):
-        print('Thread started')
+        print('DTThread.run(): Thread started')
         self.__updated.clear()
         self.__tostop.clear()
 
         self.task.init_meas()
         self.__updated.set()
         if self.task.failed or self.task.completed or self.__tostop.is_set():
-            print('Thread is about to stop after init')
+            print('DTThread.run(): Thread is about to stop after init')
             return
 
         while not self.__tostop.is_set():
@@ -530,7 +548,7 @@ class DTThread(Thread):
             if self.task.failed:
                 break
 
-        print('Thread is about to stop')
+        print('DTThread.run(): Thread is about to stop')
 
     def is_updated(self):
         return self.__updated.is_set()
@@ -539,7 +557,7 @@ class DTThread(Thread):
         return self.__updated.clear()
 
     def signal_stop(self):
-        print('Thread stop signalled')
+        print('DTThread.signal_stop(): Thread stop signalled')
         self.__tostop.set()
 
 
@@ -548,7 +566,7 @@ class DTTaskFrame(tk.Frame):
         """ Constructor for a task front-end.
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
         """
-        super().__init__(master, class_='DTTaskFrame')
+        super().__init__(master)
         self.task = task
         self.state = state
         self.direction = None
@@ -585,7 +603,7 @@ class DTTaskFrame(tk.Frame):
 
     def __createParameters(self):
         self.paramFrame = tk.LabelFrame(self.rightFrame, text="ПАРАМЕТРЫ")
-        self.paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        self.paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3, )
         self.paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
 
         self.parvars = dict()
@@ -660,8 +678,8 @@ class DTTaskFrame(tk.Frame):
                 self.resvars[res] = resvar = tk.StringVar()
                 resvar.set('----')
                 reslabel = tk.Label(self.resultFrame, textvariable=resvar)
-                reslabel.configure(relief=tk.SUNKEN, font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE, 'bold'),
-                                   padx=5, width=10, justify=tk.RIGHT)
+                reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
+                                   font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE))
                 reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
                 if unitname != '':
@@ -705,8 +723,8 @@ class DTTaskFrame(tk.Frame):
         self.menuFrame = tk.Frame(self.rightFrame)
         self.menuFrame.grid(row=2, sticky=tk.SE)
 
-        self.startButton = tk.Button(self.menuFrame, width=20)
-        self.startButton.configure(text='Запуск', command=self.__scheduleTask, bg='#21903A')
+        self.startButton = tk.Button(self.menuFrame, width=20, height=2)
+        self.__configStartButton()
         self.startButton.grid(row=0, columnspan=2, sticky=tk.W+tk.E, pady=10)
         self.startButton.focus()
 
@@ -724,21 +742,19 @@ class DTTaskFrame(tk.Frame):
             if self.state == 'last':
                 nextBtn.configure(state=tk.DISABLED)
 
-        tk.Button(self.menuFrame, text='Главное меню', command=self.__goMainMenu).\
+        tk.Button(self.menuFrame, text='Главное меню', height=2, command=self.__goMainMenu).\
             grid(row=2, columnspan=2, sticky=tk.W+tk.E, pady=10)
 
     def __update(self):
-        if self.task.failed and self.task.message != '':
+        if self.task.failed:
             self.message.configure(text=self.task.message, foreground='red')
             return
         elif self.task.single and self.task.completed:
             self.message.configure(text='ЗАВЕРШЕНО', justify=tk.CENTER, foreground='green')
             return
-        elif self.task.completed:
+        else:
             self.message.configure(foreground='green')
             self.__stepProgress()
-        else:
-            return
 
         if self.startTime == 0.:
             self.startTime = perf_counter()
@@ -774,6 +790,7 @@ class DTTaskFrame(tk.Frame):
 
     def ___plotResult(self):
         """ Call to DTPlotFrame for plotting/updating plots """
+        print('DTTaskFrame.___plotResult()')
         for res, presult in self.presults.items():
             presult['draw'] = self.plotvars[res].get() != 0
             # only FFT data need preparation for plotting, time data are always up-to-date
@@ -790,39 +807,40 @@ class DTTaskFrame(tk.Frame):
 
     def __check_thread(self):
         if self.tostop.get() == 1:
-            print('__check_thread(): Signalling thread stop')
+            print('DTTaskFrame.__check_thread(): Signalling thread stop')
             self.thread.signal_stop()
             return
         elif not self.thread.is_alive():
-            print('__check_thread(): Thread is dead. Updating frame to stop state.')
+            print('DTTaskFrame.__check_thread(): Thread is dead. Updating frame to stop state.')
             self.__update()
             self.__stopTask()
             return
         elif self.thread.is_updated():
-            print('__check_thread(): Updating frame')
+            print('DTTaskFrame.__check_thread(): Updating frame')
             try:
                 self.__update()
                 self.thread.clear_updated()
             except Exception as exc:
-                print('__check_thread(): Exception caught in __update(). Signal thread stop.')
+                print('DTTaskFrame.__check_thread(): Exception caught in __update(). Signal thread stop.')
                 self.thread.signal_stop()
                 raise exc
-        print('__check_thread(): Schedule thread check in 100ms')
+        print('DTTaskFrame.__check_thread(): Schedule thread check in 100ms')
         self.after(100, self.__check_thread)
 
     def __scheduleTask(self):
-        print('__scheduleTask()')
-        self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A10D0D')
+        print('DTTaskFrame.__scheduleTask()')
+        self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A50D00', activebackground='#C63519')
         self.tostop.set(0)
         self.message.configure(text='')
         self.after(5, self.__runTask)
 
     def __runTask(self):
-        print('__runTask()')
+        print('DTTaskFrame.__runTask()')
         if self.tostop.get() == 1:
             return
         self.progress = 0
-        if hasattr(self, 'npoints') and self.npoints > 0:
+
+        if self.startTime > 0:
             self.__resetResHist()
 
         for par in self.parvars:
@@ -835,10 +853,13 @@ class DTTaskFrame(tk.Frame):
 
         self.__check_thread()
 
+    def __configStartButton(self):
+        self.startButton.configure(text='Запуск', command=self.__scheduleTask, bg='#21903A', activebackground='#3CA54D')
+
     def __stopTask(self):
         self.tostop.set(1)
-        print('Stop command')
-        self.startButton.configure(text='Запуск', command=self.__scheduleTask, bg='#21903A')
+        print('DTTaskFrame.__stopTask()')
+        self.__configStartButton()
 
     def __goPrev(self):
         self.direction = -1
