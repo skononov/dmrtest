@@ -1,14 +1,11 @@
-from numbers import Number, Real, Integral
+from numbers import Integral
 from os import access, R_OK
 import numpy as np
-from math import pi
-from numpy.core.fromnumeric import var
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from time import perf_counter
 import tkinter as tk
-from tkinter import TclError, ttk
 # import tkinter.messagebox as tkmsg
 
 from matplotlib.figure import Figure
@@ -18,7 +15,7 @@ from threading import Thread, Event
 
 from dtexcept import DTInternalError
 from config import DTConfiguration, __appname__, __version__
-from tasks import DTScenario, DTTask, dtTaskInit, dtResultDesc, dtParameterDesc
+from tasks import DTScenario, DTTask, dtTaskInit, dtResultDesc
 import tasks
 from singleton import Singleton
 import dtglobals as dtg
@@ -80,7 +77,6 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         if access(DTApplication.__dtTkOptionFilename, R_OK):
             self.readStyle(DTApplication.__dtTkOptionFilename)
 
-
         self.mainMenuFrame = DTMainMenuFrame(self)
         self.mainMenuFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
 
@@ -114,20 +110,20 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
         self.option_add('*Entry.font', f'{MONOSPACE_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
 
-        #self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        #self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        #self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        #self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        #self.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
-        #self.option_add('*Label.background', DEFAULT_BG_COLOR)
-        #self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
-        #self.option_add('*Menu.background', _lightBG)
-        #self.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
-        #self.option_add('*Label.foreground', DEFAULT_FG_COLOR)
-        #self.option_add('*Button.foreground', DEFAULT_FG_COLOR)
-        #self.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
+        # self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        # self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        # self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
+        # self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
+        # self.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
+        # self.option_add('*Label.background', DEFAULT_BG_COLOR)
+        # self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        # self.option_add('*Menu.background', _lightBG)
+        # self.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
+        # self.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
+        # self.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
+        # self.option_add('*Label.foreground', DEFAULT_FG_COLOR)
+        # self.option_add('*Button.foreground', DEFAULT_FG_COLOR)
+        # self.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
 
     def run(self):
         self.mainloop()
@@ -251,14 +247,14 @@ class DTPlotFrame(tk.Frame):
             self.figure.canvas.flush_events()
 
     def plotGraphs(self, results: dict):
-        """Plot all marked results. Create new subplots for the first time and 
+        """Plot all marked results. Create new subplots for the first time and
            updating them if marked results are the same as in previous call.
-           results structure: 
+           results structure:
              {reskey: {'draw': bool, 'type': ('time'|'freq'), 'n': size, 'x': array, 'y': array},...}
         """
         if not hasattr(self, 'pkeys'):
             self.pkeys = None
-        ckeys = tuple([k for k,r in results.items() if r['draw']])
+        ckeys = tuple([k for k, r in results.items() if r['draw']])
         print(ckeys)
         nres = len(ckeys)
         if self.pkeys != ckeys:
@@ -288,7 +284,7 @@ class DTPlotFrame(tk.Frame):
             if nres == 0:
                 return
             axes = self.figure.axes
-            assert(len(axes)==nres)
+            assert(len(axes) == nres)
             for ax, key in zip(axes, ckeys):
                 result = results[key]
                 n = result['n']
@@ -378,9 +374,9 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         textbox = tk.Text(self.logoFrame, padx="2m", pady="1m", wrap=tk.WORD)
 
         # add a vertical scrollbar to the frame
-        ##rightScrollbar = tk.Scrollbar(textboxFrame, orient=tk.VERTICAL, command=textbox.yview)
-        ##textbox.configure(yscrollcommand = rightScrollbar.set)
-        ##rightScrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # rightScrollbar = tk.Scrollbar(textboxFrame, orient=tk.VERTICAL, command=textbox.yview)
+        # textbox.configure(yscrollcommand = rightScrollbar.set)
+        # rightScrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         textbox.grid(row=1, sticky=tk.W+tk.E+tk.N+tk.S)
         textbox.insert(tk.END, text, "normal")
@@ -613,7 +609,7 @@ class DTTaskFrame(tk.Frame):
             else:
                 dvalue = str(pvalue).replace('.', ',')
             parvar.set(dvalue)
-            
+
             self.parvars[par] = parvar
 
             # entry = tk.Entry(self.paramFrame, width=12, textvariable=parvar,
@@ -648,7 +644,7 @@ class DTTaskFrame(tk.Frame):
         self.resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
 
         if not self.task.single:
-            self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6,5))
+            self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
             self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
         self.resvars = dict()
@@ -687,7 +683,7 @@ class DTTaskFrame(tk.Frame):
             cb.grid(row=irow, column=3, padx=5)
 
             irow += 1
-        
+
         self.__resetResHist()
 
     def __createStatusFrame(self):
@@ -767,11 +763,11 @@ class DTTaskFrame(tk.Frame):
         self.startTime = 0.
         self.presults = dict()
         for res in self.plotvars:
-            if res[-3:]!='FFT':  # init time data storage
+            if res[-3:] != 'FFT':  # init time data storage
                 self.presults[res] = dict(draw=False,
                                           type='time',
                                           n=0,  # number of points
-                                          x=np.zeros(self.resHistSize, dtype='float32') ,
+                                          x=np.zeros(self.resHistSize, dtype='float32'),
                                           y=np.zeros(self.resHistSize, dtype='float32'))
             else:  # stub for FFT data
                 self.presults[res] = dict(draw=False, type='freq', n=0, x=None, y=None)

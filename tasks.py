@@ -23,9 +23,9 @@ dtParameterDesc = {
                'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1', 'format': '4.0f'},
     'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral,
                 'lowlim': 4, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1', 'format': '5.0f'},
-    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Real,  # it is displayed as float number so Real here
+    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Real,  # it is displayed as float number
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Real, # it is displayed as float number so Real here
+    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Real,  # it is displayed as float number
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real,
                'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
@@ -102,11 +102,11 @@ class DTTask:
 
     @classmethod
     def check_parameter(cls, par: str, value):
-        """ Check parameter value and return True if it's valid or False otherwise. 
+        """ Check parameter value and return True if it's valid or False otherwise.
             All values considered to be float.
             If expected parameter type is Integral, check float value has no fractions.
         """
-    
+
         global dtParameterDesc
         if par not in dtParameterDesc:
             # raise DTInternalError(cls.__name__+'.check_parameter', f'Unknown parameter "{par}"')
@@ -154,12 +154,12 @@ class DTTask:
                 pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG])
 
     def set_conv_par(self, par, value):
-        self.parameters[par]  = value * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+        self.parameters[par] = value * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
 
     def get_conv_res(self, res):
         try:
             return self.results[res] / dtg.units[dtResultDesc[res]['dunit']]['multiple']
-        except (KeyError, TypeError) as exc:
+        except (KeyError, TypeError):
             return None
 
     @classmethod
