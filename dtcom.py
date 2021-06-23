@@ -175,6 +175,9 @@ class DTSerialCom(metaclass=Singleton):
             length = actualLength
         rdata = frombuffer(response[2:], dtype=uint16, count=length)
 
+        if DEBUG:
+            print(f'{raisesource}: read data: {rdata}')
+
         return rdata
 
     def wait_status(self, mask: int, timeout=10):
