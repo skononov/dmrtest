@@ -22,10 +22,10 @@ dtParameterDesc = {
     'avenum': {'ru': 'N точек усреднения', 'en': 'Averaging points', 'type': Integral,
                'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1', 'format': '4.0f'},
     'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral,
-                'lowlim': 128, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1', 'format': '5.0f'},
-    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
+                'lowlim': 4, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1', 'format': '5.0f'},
+    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Real,  # it is displayed as float number so Real here
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
+    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Real, # it is displayed as float number so Real here
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real,
                'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
@@ -85,8 +85,7 @@ class DTTask:
         try:
             self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         except DTComError as exc:
-            if 'test' not in kwargs:
-                self.set_com_error(exc)
+            self.set_com_error(exc)
             return self
         for par in kwargs:
             if par in self.parameters:
@@ -102,14 +101,20 @@ class DTTask:
 
     @classmethod
     def check_parameter(cls, par: str, value):
+        """ Check parameter value and return True if it's valid or False otherwise. 
+            All values considered to be float.
+            If expected parameter type is Integral, check float value has no fractions.
+        """
+    
         global dtParameterDesc
         if par not in dtParameterDesc:
-            raise DTInternalError(cls.__name__+'.check_parameter', f'Unknown parameter "{par}"')
+            # raise DTInternalError(cls.__name__+'.check_parameter', f'Unknown parameter "{par}"')
+            return False
 
         pardata = dtParameterDesc[par]
-        if not isinstance(value, pardata['type']):
+        if pardata['type'] is Integral and value != int(value):
             return False
-        elif value > pardata['uplim'] or value < pardata['lowlim']:
+        if value > pardata['uplim'] or value < pardata['lowlim']:
             return False
         return True
 
@@ -128,8 +133,36 @@ class DTTask:
 
         return ok
 
+    def get_conv_par_value(self, par):
+        try:
+            return self.parameters[par] / dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+        except (KeyError, TypeError):
+            return None
+
+    def get_conv_par_all(self, par):
+        try:
+            pardesc = dtParameterDesc[par]
+            value = self.parameters[par]
+        except KeyError:
+            return None
+        mult = dtg.units[pardesc['dunit']]['multiple']
+        increment = pardesc['increment']/mult if 'increment' in pardesc else None
+        avalues = [val/mult for val in pardesc['values']] if 'values' in pardesc else None
+        return (pardesc[dtg.LANG], pardesc['type'], value/mult, pardesc['lowlim']/mult,
+                pardesc['uplim']/mult, increment, avalues,
+                pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG])
+
+    def set_conv_par(self, par, value):
+        self.parameters[par]  = value * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+
+    def get_conv_res(self, res):
+        try:
+            return self.results[res] / dtg.units[dtResultDesc[res]['dunit']]['multiple']
+        except (KeyError, TypeError) as exc:
+            return None
+
     @classmethod
-    def __decodeStatus(cls, status_word: int):
+    def __decode_status(cls, status_word: int):
         desc = ''
         for i in range(len(cls.__statusBitDescription[dtg.LANG])):
             if status_word & (1 << i) != 0:
@@ -165,7 +198,7 @@ class DTTask:
     def set_status_error(self, status: int):
         self.failed = True
         self.completed = False
-        self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') + self.__decodeStatus(status & 0x23)
+        self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') + self.__decode_status(status & 0x23)
 
     def set_pll_error(self):
         self.failed = True
@@ -243,7 +276,7 @@ class DTMeasurePower(DTTask):
             return self
 
         try:
-            pwrs = self.com.command('GET PWR', self.parameters['avenum'], nreply=2)
+            pwrs = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -292,16 +325,16 @@ class DTMeasureCarrierFrequency(DTTask):
 
         self.foffset0 = self.foffset = 0
         try:
-            isset, self.foffset0 = self.com.set_pll_freq(2, self.parameters['frequency'])
+            isset, self.foffset0 = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
 
-            bsize = self.parameters['datanum']
+            bsize = int(self.parameters['datanum'])
             # reading ADC data 1st time
             self.buffer0 = self.com.command('GET ADC DAT', [1, bsize], nreply=bsize)
 
-            isset, self.foffset = self.com.set_pll_freq(2, self.parameters['frequency'] + self.nominalCarrierOffset)
+            isset, self.foffset = self.com.set_pll_freq(2, int(self.parameters['frequency'] + self.nominalCarrierOffset))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -381,7 +414,7 @@ class DTMeasureNonlinearity(DTTask):
         self.foffset = 0
         try:
             self.com.command('SET MEASST', 2)
-            isset, self.foffset = self.com.set_pll_freq(2, self.parameters['frequency'])
+            isset, self.foffset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -398,7 +431,7 @@ class DTMeasureNonlinearity(DTTask):
 
         try:
             # reading ADC data
-            bsize = self.parameters['datanum']
+            bsize = int(self.parameters['datanum'])
             self.buffer = self.com.command('GET ADC DAT', [2, bsize], nreply=2*bsize)
         except DTComError as exc:
             self.set_com_error(exc)
@@ -471,7 +504,7 @@ class DTDMRInput(DTTask):
         self.foffset = 0
         try:
             self.com.command('SET MEASST', 6)
-            isset, self.foffset = self.com.set_pll_freq(2, self.parameters['frequency'])
+            isset, self.foffset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -490,7 +523,7 @@ class DTDMRInput(DTTask):
         if self.failed:
             return self
 
-        bitnum = self.parameters['bitnum']
+        bitnum = int(self.parameters['bitnum'])
 
         try:
             # read out the number of error dibits
@@ -615,7 +648,7 @@ class DTDMROutput(DTTask):
 
         try:
             self.com.command('SET MEASST', 5)
-            isset, foffset = self.com.set_pll_freq(1, self.parameters['frequency'])
+            isset, foffset = self.com.set_pll_freq(1, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -662,7 +695,7 @@ class DTMeasureSensitivity(DTTask):
             # set DAC to 80% of maximum amplitude and zero frequency
             self.com.command('SET LFDAC', [52400, 0], owordsize=[2, 4])
 
-            isset, foffset = self.com.set_pll_freq(1, self.parameters['frequency'] + self.parameters['modfrequency'])
+            isset, foffset = self.com.set_pll_freq(1, int(self.parameters['frequency'] + self.parameters['modfrequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -674,7 +707,7 @@ class DTMeasureSensitivity(DTTask):
 
     def __measure_inl_for_att(self, attcode: int):
         ampuplim = 0xFFFF
-        bsize = self.parameters['datanum']
+        bsize = int(self.parameters['datanum'])
         tsize = 1024
 
         self.com.command("SET ATT", attcode)
@@ -783,18 +816,23 @@ class DTTest(DTTask):
     """
     name = dict(ru='Тестовый режим', en='Test task')
 
-    def __init__(self, frequency: int = 200*MHz, datanum: int = 16384):
+    def __init__(self, frequency: int = 200*MHz, modamp: float = 50, datanum: int = 16384):
         super().__init__()
         self.parameters['frequency'] = int(frequency)
+        self.parameters['modamp'] = float(modamp)
         self.parameters['datanum'] = int(datanum)
         self.results['CARRIER FREQUENCY'] = None
         self.rng = np.random.default_rng()
         self.counter = 0
 
     def init_meas(self, **kwargs):
-        super().init_meas(test=True, **kwargs)
-        if self.failed:
-            return
+        self.failed = self.completed = False
+        self.message = ''
+        for par in kwargs:
+            if par in self.parameters:
+                self.parameters[par] = kwargs[par]
+        if not self.check_all_parameters():
+            self.set_error('Ошибка ввода параметров' if dtg.LANG == 'ru' else 'Parameter enter error')
         sleep(0.5)
         print('Task initialized', self.parameters)
         return self
