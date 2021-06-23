@@ -1,5 +1,7 @@
 import serial
+import os
 import time
+from glob import glob
 from numbers import Integral
 from numpy import frombuffer, uint16
 
@@ -21,11 +23,17 @@ class DTSerialCom(metaclass=Singleton):
 
     DEBUG = False
 
-    def __init__(self, device='/dev/ttyACM0', timeout=3):
+    def __init__(self, timeout=3):
+        devlist = glob('/dev/serial/by-id/usb-STMicroelectronics_STM32*')
+        if len(devlist) == 0:
+            raise DTComError('DTSerialCom()', f'No STM32 device found. Device is offline?')
+
+        device = os.path.realpath(devlist[0])
+
         try:
             self.port = serial.Serial(device, timeout=timeout)
         except serial.SerialException as exc:
-            raise DTComError('DTSerialCom()', f'Opening device {device} failed. Device is offline?') from exc
+            raise DTComError('DTSerialCom()', f'Opening device {device} failed.') from exc
 
     @property
     def timeout(self):
@@ -117,8 +125,12 @@ class DTSerialCom(metaclass=Singleton):
             print(f'{raisesource}: sending {packet}')
 
         # Flush all buffers before communication
-        self.port.reset_input_buffer()
-        self.port.reset_output_buffer()
+        try:
+            self.port.reset_input_buffer()
+            self.port.reset_output_buffer()
+        except Exception as exc:
+            print(raisesource+':', exc, '. Try to reopen device.')
+            self.__init__(self.timeout)
 
         try:
             nw = self.port.write(packet)

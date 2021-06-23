@@ -86,7 +86,6 @@ class DTTask:
             self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         except DTComError as exc:
             self.set_com_error(exc)
-            del self.com  # delete failed instance to try opening port next time
             return self
         for par in kwargs:
             if par in self.parameters:
@@ -195,6 +194,7 @@ class DTTask:
         self.message = ('Ошибка связи с устройством:\n' if dtg.LANG == 'ru' else 'Communication error:\n') + strexc
         if 'MCU BUSY' in strexc:
             self.message += '\nПерезагрузите устройство.'
+        del self.com  # delete failed instance to try opening port next time
 
     def set_status_error(self, status: int):
         self.failed = True
@@ -393,11 +393,11 @@ class DTMeasureNonlinearity(DTTask):
     """
     name = dict(ru='Измерение КНИ', en='THD measurement')
 
-    def __init__(self, frequency: int = 200*MHz, modamp: int = 50, modfreq: int = 10*kHz, datanum: int = 16384):
+    def __init__(self, frequency: int = 200*MHz, modamp: int = 50, modfrequency: int = 10*kHz, datanum: int = 16384):
         super().__init__()
         self.parameters['frequency'] = int(frequency)
         self.parameters['modamp'] = float(modamp)
-        self.parameters['modfreq'] = int(modfreq)
+        self.parameters['modfrequency'] = int(modfrequency)
         self.parameters['datanum'] = int(datanum)
 
         self.results['IFFT'] = None
