@@ -60,9 +60,11 @@ class DTSerialCom(metaclass=Singleton):
 
         # COMMAND null-terminated
         if isinstance(command, str):
-            packet = b'\0' + bytes(command, encoding='utf-8') + b'\0'
+            command = bytes(command, encoding='utf-8')
+            packet = b'\0' + command + b'\0'
         elif isinstance(command, bytes) or isinstance(command, bytearray):
-            packet = b'\0' + bytes(command) + b'\0'
+            command = bytes(command)
+            packet = b'\0' + command + b'\0'
         else:
             raise DTInternalError(raisesource, f'Invalid type of command argument: {type(command)}')
 
@@ -146,9 +148,9 @@ class DTSerialCom(metaclass=Singleton):
             print(f'{raisesource}: received: {response}')
 
         if response == b'':
-            raise DTComError(raisesource, f'Empty answer or timeout {self.port.timeout}s expired.')
+            raise DTComError(raisesource, f'On {command}: Empty answer or timeout {self.port.timeout}s expired.')
         elif response == b'MCU BUSY':
-            raise DTComError(raisesource, 'MCU BUSY')
+            raise DTComError(raisesource, f'On {command}: MCU BUSY')
 
         errmsgs = []
         if response[:_lenACK] != _ACK:
@@ -159,7 +161,7 @@ class DTSerialCom(metaclass=Singleton):
             errmsgs.append(f'Number of bytes in the reply ({len(response)}) does not match' +
                            f' expected one ({nbexpect}). Can not read out data.')
         if len(errmsgs) > 0:
-            raise DTComError(raisesource, '; '.join(errmsgs))
+            raise DTComError(raisesource, f'On {command}: ' + '; '.join(errmsgs))
 
         if nreply == 0:
             return None
