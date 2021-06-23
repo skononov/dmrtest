@@ -86,6 +86,7 @@ class DTTask:
             self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         except DTComError as exc:
             self.set_com_error(exc)
+            del self.com  # delete failed instance to try opening port next time
             return self
         for par in kwargs:
             if par in self.parameters:
