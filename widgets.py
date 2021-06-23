@@ -684,14 +684,12 @@ class DTTaskFrame(tk.Frame):
 
                 if unitname != '':
                     tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
-                colspan = 1
             elif res == 'IFFT' or res == 'QFFT':
                 name = res
-                colspan = 3
             else:
                 continue
 
-            tk.Label(self.resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, columnspan=colspan, sticky=tk.E)
+            tk.Label(self.resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, sticky=tk.E)
 
             self.plotvars[res] = tk.IntVar()
 
@@ -715,7 +713,7 @@ class DTTaskFrame(tk.Frame):
         #                            style='DT.Horizontal.TProgressbar')
 
         self.message = tk.Message(self.statusFrame, justify=tk.LEFT, width=self.rw-40)
-        self.message.grid()
+        self.message.grid(sticky=tk.W+tk.E)
         self.maxProgressLen = int((self.rw-40)/16)
         self.progress = -1
 
@@ -792,9 +790,9 @@ class DTTaskFrame(tk.Frame):
         """ Call to DTPlotFrame for plotting/updating plots """
         print('DTTaskFrame.___plotResult()')
         for res, presult in self.presults.items():
-            presult['draw'] = self.plotvars[res].get() != 0
+            presult['draw'] = draw = self.plotvars[res].get() != 0
             # only FFT data need preparation for plotting, time data are always up-to-date
-            if presult['type'] == 'freq':
+            if draw and presult['type'] == 'freq':
                 presult['y'] = y = self.task.results[res]
                 presult['x'] = rfftfreq(y.size, 1./dtg.adcSampleFrequency)
                 presult['n'] = y.size
