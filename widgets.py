@@ -4,7 +4,6 @@ import numpy as np
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from time import perf_counter
 import tkinter as tk
 # import tkinter.messagebox as tkmsg
 
@@ -27,7 +26,11 @@ mpl.rcParams["grid.linewidth"] = 0.5
 mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["axes.xmargin"] = 0.0
 mpl.rcParams["font.size"] = 10
-mpl.rcParams["figure.autolayout"] = True
+mpl.rcParams["figure.constrained_layout.use"] = True
+mpl.rcParams["figure.constrained_layout.h_pad"] = 0.1
+mpl.rcParams["figure.constrained_layout.w_pad"] = 0.2
+mpl.rcParams["figure.constrained_layout.hspace"] = 0.05
+mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
 
 _rootWindowWidth = 1024
 _rootWindowHeight = 700
@@ -157,10 +160,10 @@ class DTApplication(tk.Tk, metaclass=Singleton):
             tk.Label(w, bitmap=status).grid(column=0, row=0, sticky=tk.W, padx=10)
         tk.Message(w, text=message, justify=tk.LEFT, width=250).grid(row=0, column=1, sticky=tk.W+tk.E)
         if delay == 0:
-            tk.Button(w, text='ОК', command=w.destroy, padx=20, pady=5)\
+            tk.Button(w, text='ОК', command=lambda: (w.grab_release(), w.destroy()), padx=20, pady=5)\
                 .grid(row=1, column=0, columnspan=2, sticky=tk.S, pady=10)
         else:
-            self.after(int(delay*1000), w.destroy)
+            self.after(int(delay*1000), lambda: (w.grab_release(), w.destroy()))
 
 
 class DTChooseObjectMenu(tk.Menu):
@@ -234,11 +237,6 @@ class DTPlotFrame(tk.Frame):
         canvas.draw()
         canvas.get_tk_widget().grid()
 
-        # example plot
-        # x = np.arange(-4*pi, 4*pi, 0.1)
-        # y = np.sin(x)/x
-        # self.plotGraph(x, y)
-
     def plotGraph(self, x, y, labelx=None, labely=None):
         self.figure.clf()
         axes = self.figure.add_subplot(111, autoscale_on=True)
@@ -270,12 +268,14 @@ class DTPlotFrame(tk.Frame):
             self.pkeys = None
         ckeys = tuple([k for k, r in results.items() if r['draw']])
         nres = len(ckeys)
-        if self.pkeys != ckeys:
+        if nres == 0:
+            self.figure.clf()
+            self.figure.canvas.draw()
+            return
+        if self.pkeys != ckeys or len(self.figure.axes) == 0:
             # plot new
             self.pkeys = ckeys
             self.figure.clf()
-            if nres == 0:
-                return
 
             ntypes = len(set([r['type'] for r in results.values() if r['draw']]))
             self.figure.subplots(nres, 1, sharex=(ntypes == 1), subplot_kw=dict(autoscale_on=True))
@@ -289,17 +289,17 @@ class DTPlotFrame(tk.Frame):
                         ax.set_xlabel('Время [с]' if dtg.LANG == 'ru' else 'Time [s]')
                     yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
                     ax.set_ylabel(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
-                    ax.set_xlim(0, max(result['x'][n-1]+1, 10))
+                    ax.set_xlim(0, max(int(result['x'][n-1]+1), 10))
                 else:
                     ax.plot(result['x'], result['y'])
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
                     ax.set_ylabel(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
+                ax.relim(True)
+                ax.autoscale_view(tight=False)
                 ax.grid(self.gridOn, 'major')
         else:
             # update plots
-            if nres == 0:
-                return
             axes = self.figure.axes
             assert(len(axes) == nres)
             for ax, key in zip(axes, ckeys):
@@ -307,11 +307,10 @@ class DTPlotFrame(tk.Frame):
                 n = result['n']
                 ax.lines[0].set_data(result['x'][:n], result['y'][:n])
                 if result['type'] == 'time':
-                    ax.set_xlim(0, max(result['x'][n-1]+1, 10))
+                    ax.set_xlim(0, max(int(result['x'][n-1]+1), 10))
                 ax.relim(True)
-                ax.autoscale_view()
+                ax.autoscale_view(tight=False)
         self.figure.canvas.draw()
-        self.figure.canvas.flush_events()
 
     def clearCanvas(self):
         self.figure.clf()
@@ -336,6 +335,7 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         if len(scenario) == 0:
             raise DTInternalError('DTMainMenuFrame.__runScenario()', f'Empty scenario {scenario.name}.')
 
+        self.grid_forget()
         index = 0
         while True:
             state = 'midthrough'
@@ -344,7 +344,7 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
             elif index == len(scenario)-1:
                 state = 'last'
             taskFrame = DTTaskFrame(self.master, scenario[index], state=state)
-            self.master.render(taskFrame)
+            taskFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
             self.wait_window(taskFrame)
             if taskFrame.direction == 0:
                 break
@@ -355,12 +355,13 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
             if index == len(scenario):
                 break
         del taskFrame
-        self.master.render(self)
+        self.grid(sticky=tk.W+tk.E+tk.N+tk.S)
 
     def __newScenario(self):
         dialog = DTNewScenarioDialog(self.master)
         dialog.grab_set()
         self.wait_window(dialog)
+        dialog.grab_release()
         nscenarios = len(tasks.dtAllScenarios)
         if nscenarios > 0:
             self.runScenarioMB['state'] = tk.NORMAL
@@ -369,10 +370,11 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
     def __chooseTask(self, taskType: type):
         task = taskType()
         taskFrame = DTTaskFrame(self.master, task)
-        self.master.render(taskFrame)
+        self.grid_forget()
+        taskFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
         self.wait_window(taskFrame)
         del taskFrame
-        self.master.render(self)
+        self.grid(sticky=tk.W+tk.E+tk.N+tk.S)
 
     def __createLogoFrame(self):
         self.logoFrame = tk.Frame(self, padx=10, pady=10, relief=tk.GROOVE)
@@ -575,13 +577,15 @@ class DTTaskFrame(tk.Frame):
         self.__createWidgets()
 
     def __createWidgets(self):
+        self.configure(padx=5, pady=5)
         self.lw = int(0.6*_rootWindowWidth)
         self.rw = _rootWindowWidth-self.lw
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1, minsize=self.lw)
         self.columnconfigure(1, weight=1, minsize=self.rw)
 
-        tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE, borderwidth=3)\
+        tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE,
+                 borderwidth=3, font=(DEFAULT_FONT_FAMILY, BIG_FONT_SIZE))\
             .grid(row=0, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E+tk.N)
 
         self.leftFrame = tk.Frame(self, padx=10, pady=20)
@@ -634,7 +638,7 @@ class DTTaskFrame(tk.Frame):
             #                 justify=tk.RIGHT)
 
             entry = tk.Spinbox(self.paramFrame, textvariable=parvar)
-            entry.configure(width=12, from_=plowlim, to=puplim,
+            entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
                             justify=tk.RIGHT, format='%'+pformat)
             self.wpars[str(entry)] = par
             entry.bind('<Button>', self.__scrollPar)
@@ -679,7 +683,7 @@ class DTTaskFrame(tk.Frame):
                 resvar.set('----')
                 reslabel = tk.Label(self.resultFrame, textvariable=resvar)
                 reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
-                                   font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE))
+                                   font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
                 reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
                 if unitname != '':
@@ -754,10 +758,6 @@ class DTTaskFrame(tk.Frame):
             self.message.configure(foreground='green')
             self.__stepProgress()
 
-        if self.startTime == 0.:
-            self.startTime = perf_counter()
-
-        elapsedtime = perf_counter() - self.startTime
         for res in self.resvars:
             value = self.task.get_conv_res(res)
             presult = self.presults[res]
@@ -765,7 +765,7 @@ class DTTaskFrame(tk.Frame):
                 self.resvars[res].set(f'%{dtResultDesc[res]["format"]}' % value)
                 if presult['type'] == 'time':
                     n = presult['n']
-                    presult['x'][n] = elapsedtime
+                    presult['x'][n] = self.task.time
                     presult['y'][n] = value
                     presult['n'] += 1
             else:
@@ -774,7 +774,6 @@ class DTTaskFrame(tk.Frame):
         self.___plotResult()
 
     def __resetResHist(self):
-        self.startTime = 0.
         self.presults = dict()
         for res in self.plotvars:
             if res[-3:] != 'FFT':  # init time data storage
@@ -838,8 +837,7 @@ class DTTaskFrame(tk.Frame):
             return
         self.progress = 0
 
-        if self.startTime > 0:
-            self.__resetResHist()
+        self.__resetResHist()
 
         for par in self.parvars:
             pvalue = float(self.parvars[par].get().replace(',', '.'))

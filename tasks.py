@@ -76,12 +76,14 @@ class DTTask:
         self.completed = False  # if task is successfully completed
         self.single = False
         self.com = None
+        self.start = self.time = 0
 
     def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device for the task.
         """
         self.failed = self.completed = False
         self.message = ''
+        self.start = self.time = 0
         try:
             self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
         except DTComError as exc:
@@ -173,6 +175,9 @@ class DTTask:
         self.failed = False
         self.completed = True
         self.message = 'Успешно' if dtg.LANG == 'ru' else 'Success'
+        if self.start == 0.:
+            self.start = time.perf_counter()
+        self.time = time.perf_counter() - self.start
 
     def set_error(self, message: str, prependmsg=True):
         self.failed = True
@@ -704,6 +709,7 @@ class DTMeasureSensitivity(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.set_success()
         return self
 
     def __measure_inl_for_att(self, attcode: int):
