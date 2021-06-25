@@ -1,18 +1,18 @@
 from numbers import Integral
-from os import access, R_OK
+from os import access, R_OK, getpid
 import numpy as np
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import tkinter as tk
 # import tkinter.messagebox as tkmsg
+from multiprocessing import Pipe
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from threading import Thread, Event
-
 from dtexcept import DTInternalError
+from process import DTProcess
 from config import DTConfiguration, __appname__, __version__
 from tasks import DTScenario, DTTask, dtTaskInit, dtResultDesc
 import tasks
@@ -52,9 +52,16 @@ SMALL_FONT_SIZE = '10'
 
 
 class DTApplication(tk.Tk, metaclass=Singleton):
+    """ DMR TEST Application built with Tkinter
+    """
+    DEBUG = True
+
     __dtTkOptionFilename = '~/.dtstyle'
 
     def __init__(self):
+        if self.DEBUG:
+            print(f'DTApplication created in the procees PID {getpid()}')
+
         super().__init__()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         if sw/sh > 2:
@@ -75,6 +82,11 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         # init task handlers
         dtTaskInit()
 
+        # start task process
+        self.taskConn, child_conn = Pipe()
+        self.taskProcess = DTProcess(child_conn)
+        self.taskProcess.start()
+
         # set styles
         # plt.style.use('fivethirtyeight')
         plt.style.use('dark_background')
@@ -84,17 +96,6 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
         self.mainMenuFrame = DTMainMenuFrame(self)
         self.mainMenuFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
-
-    def render(self, frame: tk.Frame):
-        try:
-            if frame.winfo_ismapped() or frame.master is not self:
-                return
-            for child in self.winfo_children():
-                if not isinstance(child, tk.Toplevel):
-                    child.grid_forget()
-            frame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
-        except tk.TclError:
-            pass
 
     def readStyle(self, filename: str):
         self.option_clear()
@@ -144,9 +145,11 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
     def run(self):
         self.mainloop()
-
-    def stop(self):
-        self.destroy()
+        if self.DEBUG:
+            print('DTApplication.run(): exit event loop')
+        self.taskConn.send('terminate')
+        self.taskProcess.join()
+        self.taskConn.close()
 
     def showMessage(self, message: str, master=None, delay=0, status='default'):
         w = tk.Toplevel(padx=20, pady=10)
@@ -167,7 +170,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
 
 class DTChooseObjectMenu(tk.Menu):
-
+    """ Univeral menu for choosing one object from a list. Uses Radiobutton widget as a menu item.
+    """
     def __init__(self, menubutton, command, objects):
         super().__init__(menubutton, tearoff=0, postcommand=self.composeMenu)
         self.command = command
@@ -218,12 +222,12 @@ class DTChooseObjectMenu(tk.Menu):
 
 
 class DTPlotFrame(tk.Frame):
-    """ Widget for plotting results data with Matplotlib/TkAgg.
+    """ Widget for plotting results data with Matplotlib/TkAgg
     """
     def __init__(self, master, figsize=None):
         super().__init__(master)
         self.figure = None
-        self.gridOn = True
+        self.gridOn = True  # flag for adding grid to exes
         self.createCanvas(figsize)
 
     def createCanvas(self, figsize=None):
@@ -276,6 +280,9 @@ class DTPlotFrame(tk.Frame):
             # plot new
             self.pkeys = ckeys
             self.figure.clf()
+            if nres == 0:
+                self.figure.canvas.draw()
+                return
 
             ntypes = len(set([r['type'] for r in results.values() if r['draw']]))
             self.figure.subplots(nres, 1, sharex=(ntypes == 1), subplot_kw=dict(autoscale_on=True))
@@ -300,6 +307,8 @@ class DTPlotFrame(tk.Frame):
                 ax.grid(self.gridOn, 'major')
         else:
             # update plots
+            if nres == 0:
+                return
             axes = self.figure.axes
             assert(len(axes) == nres)
             for ax, key in zip(axes, ckeys):
@@ -314,10 +323,12 @@ class DTPlotFrame(tk.Frame):
 
     def clearCanvas(self):
         self.figure.clf()
+        self.figure.canvas.draw()
 
 
 class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
-
+    """ Main menu frame drawn in the root window
+    """
     def __init__(self, master):
         super().__init__(master)
         self.configure(padx=10, pady=10)
@@ -433,12 +444,13 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         csb.grid(row=3, sticky=tk.W+tk.E)
         csb.focus()
 
-        quitb = tk.Button(self.menuFrame, text='Выход', command=self.quit, height=2)
+        quitb = tk.Button(self.menuFrame, text='Выход', command=self.master.quit, height=2)
         quitb.grid(row=4, sticky=tk.W+tk.E+tk.S)
 
 
 class DTNewScenarioDialog(tk.Toplevel):
-
+    """ A dialog window for defining a new scenario.
+    """
     def __init__(self, master=None):
         super().__init__(master)
         x0, y0 = master.winfo_rootx(), master.winfo_rooty()
@@ -526,46 +538,12 @@ class DTNewScenarioDialog(tk.Toplevel):
             self.taskListbox.delete(selected[0])
 
 
-class DTThread(Thread):
-    def __init__(self, task: DTTask):
-        super().__init__()
-        self.task = task
-        self.__updated = Event()
-        self.__tostop = Event()
-
-    def run(self):
-        print('DTThread.run(): Thread started')
-        self.__updated.clear()
-        self.__tostop.clear()
-
-        self.task.init_meas()
-        self.__updated.set()
-        if self.task.failed or self.task.completed or self.__tostop.is_set():
-            print('DTThread.run(): Thread is about to stop after init')
-            return
-
-        while not self.__tostop.is_set():
-            self.task.measure()
-            self.__updated.set()
-            if self.task.failed:
-                break
-
-        print('DTThread.run(): Thread is about to stop')
-
-    def is_updated(self):
-        return self.__updated.is_set()
-
-    def clear_updated(self):
-        return self.__updated.clear()
-
-    def signal_stop(self):
-        print('DTThread.signal_stop(): Thread stop signalled')
-        self.__tostop.set()
-
-
 class DTTaskFrame(tk.Frame):
+    """ A frame rendered in the root window to manage task execution
+    """
     def __init__(self, master, task: DTTask, state=None):
         """ Constructor for a task front-end.
+            task - DTTask object to be managed
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
         """
         super().__init__(master)
@@ -573,6 +551,10 @@ class DTTaskFrame(tk.Frame):
         self.state = state
         self.direction = None
         self.resHistSize = 10000
+
+        # objects to communicate with task process
+        self.taskConn = DTApplication().taskConn
+        self.taskProcess = DTApplication().taskProcess
 
         self.__createWidgets()
 
@@ -582,7 +564,7 @@ class DTTaskFrame(tk.Frame):
         self.rw = _rootWindowWidth-self.lw
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=1, minsize=self.lw)
-        self.columnconfigure(1, weight=1, minsize=self.rw)
+        self.columnconfigure(1, weight=1)
 
         tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE,
                  borderwidth=3, font=(DEFAULT_FONT_FAMILY, BIG_FONT_SIZE))\
@@ -594,7 +576,7 @@ class DTTaskFrame(tk.Frame):
         self.leftFrame.grid(row=1, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
 
         self.rightFrame = tk.Frame(self, padx=10, pady=20)
-        self.rightFrame.columnconfigure(0, weight=1, minsize=self.rw-20)
+        self.rightFrame.columnconfigure(0, weight=1)
         self.rightFrame.rowconfigure(2, weight=1)
         self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
 
@@ -665,11 +647,11 @@ class DTTaskFrame(tk.Frame):
         self.resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
         self.resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        if not self.task.single:
-            self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
-            self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
+        self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
+        self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
         self.resvars = dict()
+        self.reslabels = dict()
         self.plotvars = dict()
 
         irow = 0
@@ -681,13 +663,12 @@ class DTTaskFrame(tk.Frame):
 
                 self.resvars[res] = resvar = tk.StringVar()
                 resvar.set('----')
-                reslabel = tk.Label(self.resultFrame, textvariable=resvar)
+                self.reslabels[res] = reslabel = tk.Label(self.resultFrame, textvariable=resvar)
                 reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
                                    font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
                 reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-                if unitname != '':
-                    tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
+                tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
             elif res == 'IFFT' or res == 'QFFT':
                 name = res
             else:
@@ -707,18 +688,13 @@ class DTTaskFrame(tk.Frame):
         self.__resetResHist()
 
     def __createStatusFrame(self):
-        self.statusFrame = tk.Frame(self.rightFrame, padx=5, pady=5, relief=tk.GROOVE, borderwidth=3)
+        self.statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
         self.statusFrame.grid(row=1, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        # progressStyle = ttk.Style()
-        # progressStyle.configure('DT.Horizontal.TProgressbar', background='green')
-        # self.progressBar = ttk.Progressbar(self.statusFrame)
-        # self.progressBar.configure(length=self.rw-40, mode='indeterminate', orient=tk.HORIZONTAL,
-        #                            style='DT.Horizontal.TProgressbar')
-
-        self.message = tk.Message(self.statusFrame, justify=tk.LEFT, width=self.rw-40)
+        self.message = tk.Message(self.statusFrame, justify=tk.LEFT, width=self.rw-60)
+        # self.message = tk.Label(self.statusFrame, justify=tk.LEFT, height=5, width=40, wraplength=360, relief=tk.SUNKEN)
+        # wraplength actually is the text width in Label in pixels
         self.message.grid(sticky=tk.W+tk.E)
-        self.maxProgressLen = int((self.rw-40)/16)
         self.progress = -1
 
     def __createMenu(self):
@@ -731,6 +707,7 @@ class DTTaskFrame(tk.Frame):
         self.startButton.focus()
 
         if self.state is not None:
+            # widgets for navigation in the scenario
             navFrame = tk.Frame(self.menuFrame)
             navFrame.grid(row=1, pady=10, sticky=tk.W+tk.E)
             navFrame.columnconfigure(0, weight=1)
@@ -752,17 +729,36 @@ class DTTaskFrame(tk.Frame):
             self.message.configure(text=self.task.message, foreground='red')
             return
         elif self.task.single and self.task.completed:
-            self.message.configure(text='ЗАВЕРШЕНО', justify=tk.CENTER, foreground='green')
+            self.message.configure(text='ЗАВЕРШЕНО', foreground='green')
+            return
+        elif self.task.completed:
+            self.progress += 1
+            self.message.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
+        elif self.task.inited:
+            self.message.configure(text='ГОТОВ', foreground='green')
             return
         else:
-            self.message.configure(foreground='green')
-            self.__stepProgress()
+            self.message.configure(text='Неизвестное состояние режима', foreground='red')
+            return
 
         for res in self.resvars:
             value = self.task.get_conv_res(res)
             presult = self.presults[res]
             if value is not None:
-                self.resvars[res].set(f'%{dtResultDesc[res]["format"]}' % value)
+                fmt = f'%{dtResultDesc[res]["format"]}'
+                if isinstance(self.task, tasks.DTMeasureSensitivity) and res == 'THRESHOLD POWER':
+                    reslabel = self.reslabels[res]
+                    reslabel.configure(fg='red')
+                    if self.task.results['STATUS'] == -1:  # actual thr. power is lower
+                        fmt = '<' + fmt
+                    elif self.task.results['STATUS'] == 1:  # actual thr. power is higher
+                        fmt = '>' + fmt
+                    elif self.task.results['STATUS'] == 2:  # fluctuations
+                        fmt = '~' + fmt
+                    else:
+                        reslabel.configure(fg='green')
+
+                self.resvars[res].set(fmt % value)
                 if presult['type'] == 'time':
                     n = presult['n']
                     presult['x'][n] = self.task.time
@@ -771,7 +767,15 @@ class DTTaskFrame(tk.Frame):
             else:
                 self.resvars[res].set('----')
 
-        self.___plotResult()
+            # Prepare for plotting results
+            presult['draw'] = draw = self.plotvars[res].get() != 0
+            # only FFT data need preparation for plotting, time data are always up-to-date
+            if draw and presult['type'] == 'freq':
+                presult['y'] = y = self.task.results[res]
+                presult['x'] = rfftfreq(y.size, 1./dtg.adcSampleFrequency)
+                presult['n'] = y.size
+
+        self.plotFrame.plotGraphs(self.presults)
 
     def __resetResHist(self):
         self.presults = dict()
@@ -785,92 +789,95 @@ class DTTaskFrame(tk.Frame):
             else:  # stub for FFT data
                 self.presults[res] = dict(draw=False, type='freq', n=0, x=None, y=None)
 
-    def ___plotResult(self):
-        """ Call to DTPlotFrame for plotting/updating plots """
-        print('DTTaskFrame.___plotResult()')
-        for res, presult in self.presults.items():
-            presult['draw'] = draw = self.plotvars[res].get() != 0
-            # only FFT data need preparation for plotting, time data are always up-to-date
-            if draw and presult['type'] == 'freq':
-                presult['y'] = y = self.task.results[res]
-                presult['x'] = rfftfreq(y.size, 1./dtg.adcSampleFrequency)
-                presult['n'] = y.size
+    def __check_process(self):
+        if not self.taskProcess.is_alive():  # unexpected stop of DTProcess
+            raise DTInternalError(self.__class__.__name__,
+                                  f'DTProcess is dead, that must not happen while application is running')
 
-        self.plotFrame.plotGraphs(self.presults)
-
-    def __stepProgress(self):
-        self.progress = (self.progress+1) % self.maxProgressLen
-        self.message['text'] = '\u2588' * self.progress
-
-    def __check_thread(self):
-        if self.tostop.get() == 1:
-            print('DTTaskFrame.__check_thread(): Signalling thread stop')
-            self.thread.signal_stop()
+        if self.tostop.get() == 1:  # stop from the user
+            if DTApplication().DEBUG:
+                print('DTTaskFrame.__check_process(): User requested stop. Do nothing here.')
             return
-        elif not self.thread.is_alive():
-            print('DTTaskFrame.__check_thread(): Thread is dead. Updating frame to stop state.')
-            self.__update()
-            self.__stopTask()
-            return
-        elif self.thread.is_updated():
-            print('DTTaskFrame.__check_thread(): Updating frame')
-            try:
-                self.__update()
-                self.thread.clear_updated()
-            except Exception as exc:
-                print('DTTaskFrame.__check_thread(): Exception caught in __update(). Signal thread stop.')
-                self.thread.signal_stop()
-                raise exc
-        print('DTTaskFrame.__check_thread(): Schedule thread check in 100ms')
-        self.after(100, self.__check_thread)
 
-    def __scheduleTask(self):
-        print('DTTaskFrame.__scheduleTask()')
-        self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A50D00', activebackground='#C63519')
-        self.tostop.set(0)
-        self.message.configure(text='')
-        self.after(5, self.__runTask)
+        if self.taskConn.poll():  # new task data are available for retrieving
+            msg = self.taskConn.recv()  # retrieve task object
+            if isinstance(msg, DTTask):
+                self.task = msg
+                if DTApplication().DEBUG:
+                    print('DTTaskFrame.__check_process(): Updating frame')
+                try:
+                    self.__update()
+                except Exception as exc:
+                    if DTApplication().DEBUG:
+                        print('DTTaskFrame.__check_process(): Exception caught during frame update. Stopping task run.')
+                    self.taskConn.send('stop')
+                    raise exc
+            elif msg == 'stopped':  # task running finished
+                if DTApplication().DEBUG:
+                    print('DTTaskFrame.__check_process(): Task run finished')
+                return
+
+        self.after(100, self.__check_process)
 
     def __runTask(self):
-        print('DTTaskFrame.__runTask()')
-        if self.tostop.get() == 1:
-            return
+        if DTApplication().DEBUG:
+            print('DTTaskFrame.__runTask() entered')
+        self.tostop.set(0)
+        self.message.configure(text='')
         self.progress = 0
+        # clear leftovers in the pipe
+        if self.taskConn.poll():
+            self.taskConn.recv()
 
         self.__resetResHist()
+        self.plotFrame.clearCanvas()
 
         for par in self.parvars:
             pvalue = float(self.parvars[par].get().replace(',', '.'))
             self.task.set_conv_par(par, pvalue)
 
-        self.thread = DTThread(self.task)
+        self.taskConn.send(self.task)
 
-        self.thread.start()
+        self.__configStopButton()
 
-        self.__check_thread()
+        if DTApplication().DEBUG:
+            print('DTTaskFrame.__runTask(): Schedule __check_process()')
+        self.after(100, self.__check_process())
 
     def __configStartButton(self):
-        self.startButton.configure(text='Запуск', command=self.__scheduleTask, bg='#21903A', activebackground='#3CA54D')
+        self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A', activebackground='#3CA54D')
+
+    def __configStopButton(self):
+        self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A50D00', activebackground='#C63519')
 
     def __stopTask(self):
         self.tostop.set(1)
-        print('DTTaskFrame.__stopTask()')
+        if DTApplication().DEBUG:
+            print(f'DTTaskFrame.__stopTask(): Stop button is pressed. Sending stop to DTProcess')
+        self.taskConn.send('stop')  # sending 'stop' to DTProcess
+        while self.taskConn.recv() != 'stopped':  # await 'stopped' from DTProcess
+            self.update()
+        if DTApplication().DEBUG:
+            print(f'DTTaskFrame.__stopTask(): Received "stopped" from DTProcess')
         self.__configStartButton()
 
     def __goPrev(self):
         self.direction = -1
-        if hasattr(self, 'thread'):
-            self.thread.signal_stop()
+        if DTApplication().DEBUG:
+            print('DTTaskFrame.__goPrev(): Signalling task stop')
+        self.taskConn.send('stop')  # stop task in DTProcess
         self.destroy()
 
     def __goNext(self):
         self.direction = 1
-        if hasattr(self, 'thread'):
-            self.thread.signal_stop()
+        if DTApplication().DEBUG:
+            print('DTTaskFrame.__goNext(): Signalling task stop')
+        self.taskConn.send('stop')  # stop task in DTProcess
         self.destroy()
 
     def __goMainMenu(self):
         self.direction = 0
-        if hasattr(self, 'thread'):
-            self.thread.signal_stop()
+        if DTApplication().DEBUG:
+            print('DTTaskFrame.__goMainMenu(): Signalling task stop')
+        self.taskConn.send('stop')  # stop task in DTProcess
         self.destroy()

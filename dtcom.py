@@ -30,6 +30,9 @@ class DTSerialCom(metaclass=Singleton):
 
         device = os.path.realpath(devlist[0])
 
+        if self.DEBUG:
+            print(f'DTSerialCom.__init__(): Opening found device {device}')
+
         try:
             self.port = serial.Serial(device, timeout=timeout)
         except serial.SerialException as exc:

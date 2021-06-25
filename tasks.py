@@ -73,15 +73,16 @@ class DTTask:
         self.results = dict()  # results of the task
         self.message = ''  # message to be shown after execution
         self.failed = False  # if last task call is failed
-        self.completed = False  # if task is successfully completed
+        self.inited = False  # init_meas successfully completed
+        self.completed = False  # if measure successfully completed
         self.single = False
         self.com = None
         self.start = self.time = 0
 
     def init_meas(self, **kwargs):
-        """ This method should be implemented to initialise the device for the task.
+        """ This method should be implemented to initialise the device just before the task run
         """
-        self.failed = self.completed = False
+        self.failed = self.completed = self.inited = False
         self.message = ''
         self.start = self.time = 0
         try:
@@ -97,7 +98,7 @@ class DTTask:
         return self
 
     def measure(self):
-        """ This method should be implemented to perform one measurement. Should return self.
+        """ This method should be implemented to perform one measurement
         """
         return self
 
@@ -121,6 +122,8 @@ class DTTask:
         return True
 
     def check_all_parameters(self):
+        """ Check all defined parameters and return True in case of success, False otherwise.
+        """
         global dtParameterDesc
         self.message = ''
         ok = True
@@ -243,6 +246,7 @@ class DTCalibrate(DTTask):
             self.set_status_error(status)
             return self
 
+        self.inited = True
         self.set_success()
         return self
 
@@ -274,10 +278,13 @@ class DTMeasurePower(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.inited = True
         return self
 
     def measure(self):
         self.completed = False
+        self.results['REFOUTPOWER'] = None
+        self.results['INPOWER'] = None
         if self.failed:
             return self
 
@@ -322,10 +329,13 @@ class DTMeasureCarrierFrequency(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.inited = True
         return self
 
     def measure(self):
         self.completed = False
+        self.results['CARRIER FREQUENCY'] = None
+        self.results['IFFT'] = None
         if self.failed:
             return self
 
@@ -430,10 +440,16 @@ class DTMeasureNonlinearity(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.inited = True
         return self
 
     def measure(self):
         self.completed = False
+        self.results['INL'] = None
+        self.results['MODINDEX'] = None
+        self.results['IFFT'] = self.results['QFFT'] = None
+        if self.failed:
+            return self
 
         try:
             # reading ADC data
@@ -518,6 +534,7 @@ class DTDMRInput(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.inited = True
         return self
 
     def measure(self):
@@ -525,7 +542,6 @@ class DTDMRInput(DTTask):
         self.results['BITERR'] = None
         self.results['BITFREQDEV'] = None
         self.results['BITPOWERDIF'] = None
-
         if self.failed:
             return self
 
@@ -665,6 +681,7 @@ class DTDMROutput(DTTask):
             return self
 
         self.set_success()
+        self.inited = True
         return self
 
 
@@ -688,7 +705,7 @@ class DTMeasureSensitivity(DTTask):
         self.parameters['datanum'] = int(datanum)
         self.buffer = None
         self.results['THRESHOLD POWER'] = None
-        self.results['STATUS'] = None
+        self.rng = np.random.default_rng()  # stub
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -709,7 +726,63 @@ class DTMeasureSensitivity(DTTask):
             self.set_com_error(exc)
             return self
 
+        self.inited = True
+        return self
+
+    def measure(self):
+        self.completed = False
+        self.results['THRESHOLD POWER'] = None
+        self.results['STATUS'] = None
+        if self.failed:
+            return self
+
+        time.sleep(0.5)
+        self.results['THRESHOLD POWER'] = self.rng.normal(10, 1)
+        self.results['STATUS'] = -1
         self.set_success()
+        return self
+
+        self.adcrange = 0
+        try:
+            attrange = range(1, 64)
+            lastinlcomp = True
+            while len(attrange) > 1:
+                midindex = len(attrange)//2
+                attcode = attrange[midindex]
+                lastinlcomp = self.__measure_inl_for_att(attcode)
+                if self.failed:
+                    return self
+                if lastinlcomp:  # inl < refinl
+                    attrange = attrange[midindex:]
+                else:  # inl > refinl
+                    if self.failed:  # failed to measure INL
+                        return self
+                    attrange = attrange[:midindex]
+        except DTComError as exc:
+            self.set_com_error(exc)
+            return self
+
+        if attcode != attrange[0]:
+            # do last measurement if INL
+            attcode = attrange[0]
+            lastinlcomp = self.__measure_inl_for_att(attcode)
+
+        if lastinlcomp and attcode == 63:
+            # threshold power is lower than achievable
+            status = -1
+        elif not lastinlcomp and attcode == 1:
+            # threshold power is higher than achievable
+            status = 1
+        elif attcode < 63 and lastinlcomp == self.__measure_inl_for_att(attcode+1):
+            # Could not find the exact threshold. Signal is fluctuating?
+            status = 2
+        else:
+            status = 0
+
+        self.results['THRESHOLD POWER'] = self.parameters['refoutpower'] + self.parameters['refatt'] - 0.5*attcode
+        self.results['STATUS'] = status
+        self.set_success()
+
         return self
 
     def __measure_inl_for_att(self, attcode: int):
@@ -756,50 +829,6 @@ class DTMeasureSensitivity(DTTask):
 
         return False
 
-    def measure(self):
-        self.completed = False
-        self.adcrange = 0
-
-        try:
-            attrange = range(1, 64)
-            lastinlcomp = True
-            while len(attrange) > 1:
-                midindex = len(attrange)//2
-                attcode = attrange[midindex]
-                lastinlcomp = self.__measure_inl_for_att(attcode)
-                if lastinlcomp:  # inl < refinl
-                    attrange = attrange[midindex:]
-                else:
-                    if self.failed:  # failed to measure INL
-                        return self
-                    attrange = attrange[:midindex]
-        except DTComError as exc:
-            self.set_com_error(exc)
-            return self
-
-        if attcode != attrange[0]:
-            # do last measurement if INL
-            attcode = attrange[0]
-            lastinlcomp = self.__measure_inl_for_att(attcode)
-
-        if lastinlcomp and attcode == 63:
-            # threshold power is lower than achievable
-            status = -1
-        elif not lastinlcomp and attcode == 1:
-            # threshold power is higher than achievable
-            status = 1
-        elif attcode < 63 and lastinlcomp == self.__measure_inl_for_att(attcode+1):
-            # Could not find the exact threshold. Signal is fluctuating?
-            status = 2
-        else:
-            status = 0
-
-        self.results['THRESHOLD POWER'] = self.parameters['refoutpower'] + self.parameters['refatt'] - 0.5*attcode
-        self.results['STATUS'] = status
-        self.set_success()
-
-        return self
-
     def __eval_inl(self):
         if self.buffer is None:
             return None
@@ -834,6 +863,7 @@ class DTTest(DTTask):
 
     def init_meas(self, **kwargs):
         self.failed = self.completed = False
+        self.start = self.time = 0
         self.message = ''
         for par in kwargs:
             if par in self.parameters:
@@ -842,6 +872,7 @@ class DTTest(DTTask):
             self.set_error('Ошибка ввода параметров' if dtg.LANG == 'ru' else 'Parameter enter error')
         sleep(0.5)
         print('Task initialized', self.parameters)
+        self.inited = True
         return self
 
     def measure(self):
