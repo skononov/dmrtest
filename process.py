@@ -1,7 +1,6 @@
 from tasks import DTTask
 from multiprocessing import Process
 from multiprocessing.connection import Connection
-from copy import copy
 
 
 class DTProcess(Process):
@@ -33,34 +32,33 @@ class DTProcess(Process):
     def __runTask(self, task: DTTask):
         if self.DEBUG:
             print(f'DTProcess: Task {task.name["en"]} started')
+
         msg = None
+
         task.init_meas()
-        self.__sendResults(task)
+
         if self.conn.poll():
             msg = self.conn.recv()
+
         if task.failed or task.completed or msg == 'stop':
-            if self.DEBUG:
-                print(f'DTProcess: Task {task.name["en"]} finished after init')
-            if msg == 'stop':
-                print(f'DTProcess: by user request')
-            self.conn.send('stopped')
-            return
-
-        while msg != 'stop':
-            task.measure()
             self.__sendResults(task)
-            if task.failed:
-                break
-            if self.conn.poll():
-                msg = self.conn.recv()
+            if self.DEBUG:
+                print('DTProcess: task stopped after init')
+        else:  # continue with the measurements
+            while msg != 'stop':
+                task.measure()
+                self.__sendResults(task)
+                if task.failed:
+                    break
+                if self.conn.poll():
+                    msg = self.conn.recv()
 
-        self.conn.send('stopped')
+        self.conn.send(f'stopped {task.id}')
         if self.DEBUG:
-            print(f'DTProcess: Task {task.name["en"]} finished')
+            print(f'DTProcess: Task "{task.name["en"]}" finished')
 
     def __sendResults(self, task: DTTask):
         if self.DEBUG:
             print('DTProcess: Sending task results')
-        rtask = copy(task)  # shallow copying the task object before sending
-        rtask.com = None  # avoid using or deleting DTSerialCom instance in the main process
+        rtask = DTTask().results_from(task)  # copying the results to a new task object before sending
         self.conn.send(rtask)

@@ -75,9 +75,10 @@ class DTTask:
         self.failed = False  # if last task call is failed
         self.inited = False  # init_meas successfully completed
         self.completed = False  # if measure successfully completed
-        self.single = False
-        self.com = None
-        self.start = self.time = 0
+        self.single = False  # if task is single (only init_meas(), no measure() methon defined)
+        self.com = None  # reference to DTSerialCom instance
+        self.start = self.time = 0  # time of measurements
+        self.id = None  # ID of the task (set once in the main process)
 
     def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device just before the task run
@@ -165,6 +166,27 @@ class DTTask:
             return self.results[res] / dtg.units[dtResultDesc[res]['dunit']]['multiple']
         except (KeyError, TypeError):
             return None
+
+    def results_from(self, src):
+        """ Copy (by ref) result fields only to this instance from a given one
+        """
+        if isinstance(src, DTTask):
+            self.id = src.id
+            self.results = src.results
+            self.message = src.message
+            self.time = src.time
+            self.failed = src.failed
+            self.inited = src.inited
+            self.completed = src.completed
+        return self
+
+    def set_id(self, id_=None):
+        """ Set ID of the task. Should be called from the main process.
+        """
+        if id_ is None:
+            self.id = id(self)
+        else:
+            self.id = id_
 
     @classmethod
     def __decode_status(cls, status_word: int):
@@ -905,11 +927,13 @@ class DTScenario:
 
         dtAllScenarios[name] = self
 
-    def addTask(self, tasktype: DTTask):
-        if tasktype not in dtTaskTypes:
+    def addTask(self, taskType: DTTask):
+        if taskType not in dtTaskTypes:
             raise DTInternalError('DTScenario.addTask()', f'Unknown task type given')
 
-        self.tasks.append(tasktype())
+        task = taskType()
+        task.set_id()  # scenario is created in the main process, set task ID here
+        self.tasks.append(task)
 
     def __getitem__(self, key):
         return self.tasks[key]
