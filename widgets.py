@@ -15,7 +15,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from dtexcept import DTInternalError
 from process import DTProcess
 from config import DTConfiguration, __appname__, __version__
-from tasks import DTScenario, DTTask, dtTaskInit, dtResultDesc
+from tasks import DTScenario, DTTask, dtTaskInit, dtParameterDesc, dtResultDesc
 import tasks
 from singleton import Singleton
 import dtglobals as dtg
@@ -612,9 +612,13 @@ class DTTaskFrame(tk.Frame):
         self.__createResults()
 
     def __createParameters(self):
-        self.paramFrame = tk.LabelFrame(self.rightFrame, text="ПАРАМЕТРЫ")
-        self.paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3, )
-        self.paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
+        paramFrame = tk.LabelFrame(self.rightFrame, text="ПАРАМЕТРЫ")
+        paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
+
+        resultTolFrame = tk.LabelFrame(self.rightFrame, text="ДОПУСКИ")
+        resultTolFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        resultTolFrame.grid(row=1, sticky=tk.W+tk.E+tk.N)
 
         self.parvars = dict()
         self.wpars = dict()
@@ -625,11 +629,11 @@ class DTTaskFrame(tk.Frame):
             if partuple is None:
                 continue
 
-            self.paramFrame.rowconfigure(irow, pad=10)
+            paramFrame.rowconfigure(irow, pad=10)
 
             pname, ptype, pvalue, plowlim, puplim, pincr, pavalues, pformat, punit = partuple
 
-            tk.Label(self.paramFrame, text=pname+':').grid(row=irow, column=0, sticky=tk.E)
+            tk.Label(paramFrame, text=pname+':').grid(row=irow, column=0, sticky=tk.E)
 
             parvar = tk.StringVar()
             if ptype is Integral:
@@ -640,10 +644,10 @@ class DTTaskFrame(tk.Frame):
 
             self.parvars[par] = parvar
 
-            # entry = tk.Entry(self.paramFrame, width=12, textvariable=parvar,
+            # entry = tk.Entry(paramFrame, width=12, textvariable=parvar,
             #                 justify=tk.RIGHT)
 
-            entry = tk.Spinbox(self.paramFrame, textvariable=parvar)
+            entry = tk.Spinbox(paramFrame, textvariable=parvar)
             entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
                             justify=tk.RIGHT, format='%'+pformat)
             self.wpars[str(entry)] = par
@@ -656,9 +660,48 @@ class DTTaskFrame(tk.Frame):
 
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-            tk.Label(self.paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
+            tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
 
             irow += 1
+        """
+        irow = 0
+        for res in self.task.results:
+            if res not in dtParameterDesc:
+                continue
+
+            resultTolFrame.rowconfigure(irow, pad=10)
+
+            name = dtResultDesc[res][dtg.LANG]
+            unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
+            
+            tk.Label(paramFrame, text=name+':').grid(row=irow, column=0, sticky=tk.E)
+
+            parvar = tk.StringVar()
+            if ptype is Integral:
+                dvalue = str(int(pvalue))
+            else:
+                dvalue = str(pvalue).replace('.', ',')
+            parvar.set(dvalue)
+
+            self.parvars[par] = parvar
+
+            entry = tk.Spinbox(paramFrame, textvariable=parvar)
+            entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
+                            justify=tk.RIGHT, format='%'+pformat)
+            self.wpars[str(entry)] = par
+            entry.bind('<Button>', self.__scrollPar)
+            entry.bind('<Key>', self.__scrollPar)
+            if pavalues is not None:
+                entry.configure(values=pavalues)
+            else:  # use increment
+                entry.configure(increment=pincr)
+
+            entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
+
+            tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
+
+            irow += 1
+            """
 
     def __scrollPar(self, event: tk.Event):
         if event.num == 4 or event.keycode == 98:  # up
@@ -667,9 +710,9 @@ class DTTaskFrame(tk.Frame):
             event.widget.invoke('buttondown')
 
     def __createResults(self):
-        self.resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
-        self.resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
-        self.resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
+        resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
+        resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
+        resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
 
         self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
         self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
@@ -679,27 +722,27 @@ class DTTaskFrame(tk.Frame):
 
         irow = 0
         for res in self.task.results:
-            self.resultFrame.rowconfigure(irow, pad=10)
+            resultFrame.rowconfigure(irow, pad=10)
             if res in dtResultDesc:
                 name = dtResultDesc[res][dtg.LANG]
                 unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
 
-                self.reslabels[res] = reslabel = tk.Label(self.resultFrame, text='----')
+                self.reslabels[res] = reslabel = tk.Label(resultFrame, text='----')
                 reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
                                    font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
                 reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-                tk.Label(self.resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
+                tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
             elif res == 'IFFT' or res == 'QFFT':
                 name = res
             else:
                 continue
 
-            tk.Label(self.resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, sticky=tk.E)
+            tk.Label(resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, sticky=tk.E)
 
             self.plotvars[res] = tk.IntVar()
 
-            cb = tk.Checkbutton(self.resultFrame, text='Рисовать')
+            cb = tk.Checkbutton(resultFrame, text='Рисовать')
             cb.configure(indicatoron=0, variable=self.plotvars[res],
                          padx=3, pady=3)
             cb.grid(row=irow, column=3, padx=5)
@@ -709,38 +752,38 @@ class DTTaskFrame(tk.Frame):
         self.__resetResHist()
 
     def __createStatusFrame(self):
-        self.statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
-        self.statusFrame.grid(row=1, sticky=tk.W+tk.E+tk.N, pady=5)
+        statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
+        statusFrame.grid(row=1, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        self.message = tk.Message(self.statusFrame, justify=tk.LEFT, width=self.rw-60)
+        self.message = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-60)
         self.message.grid(sticky=tk.W+tk.E)
         self.progress = -1
 
     def __createMenu(self):
-        self.menuFrame = tk.Frame(self.rightFrame)
-        self.menuFrame.grid(row=2, sticky=tk.SE)
+        menuFrame = tk.Frame(self.rightFrame)
+        menuFrame.grid(row=2, sticky=tk.SE)
 
-        self.startButton = tk.Button(self.menuFrame, width=20, height=2)
+        self.startButton = tk.Button(menuFrame, width=20, height=2)
         self.__configStartButton()
         self.startButton.grid(row=0, columnspan=2, sticky=tk.W+tk.E, pady=10)
         self.startButton.focus()
 
         if self.state is not None:
             # widgets for navigation in the scenario
-            navFrame = tk.Frame(self.menuFrame)
+            navFrame = tk.Frame(menuFrame)
             navFrame.grid(row=1, pady=10, sticky=tk.W+tk.E)
             navFrame.columnconfigure(0, weight=1)
             navFrame.columnconfigure(1, weight=1)
-            prevBtn = tk.Button(self.menuFrame, text='< Пред.', command=self.__goPrev)
+            prevBtn = tk.Button(menuFrame, text='< Пред.', command=self.__goPrev)
             prevBtn.grid(row=1, column=0, sticky=tk.W+tk.E)
             if self.state == 'first':
                 prevBtn.configure(state=tk.DISABLED)
-            nextBtn = tk.Button(self.menuFrame, text='След. >', command=self.__goNext)
+            nextBtn = tk.Button(menuFrame, text='След. >', command=self.__goNext)
             nextBtn.grid(row=1, column=1, sticky=tk.W+tk.E)
             if self.state == 'last':
                 nextBtn.configure(state=tk.DISABLED)
 
-        tk.Button(self.menuFrame, text='Главное меню', height=2, command=self.__goMainMenu).\
+        tk.Button(menuFrame, text='Главное меню', height=2, command=self.__goMainMenu).\
             grid(row=2, columnspan=2, sticky=tk.W+tk.E, pady=10)
 
     def __update(self):
@@ -902,21 +945,24 @@ class DTTaskFrame(tk.Frame):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goPrev(): Signalling task stop')
         self.direction = -1
-        self.tostop.set(1)
+        self.taskConn.send('stop')  # sending 'stop' to DTProcess
+        self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
         self.frameFinished.set(1)
 
     def __goNext(self):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goNext(): Signalling task stop')
         self.direction = 1
-        self.tostop.set(1)
+        self.taskConn.send('stop')  # sending 'stop' to DTProcess
+        self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
         self.frameFinished.set(1)
 
     def __goMainMenu(self):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goMainMenu(): Signalling task stop')
         self.direction = 0
-        self.tostop.set(1)
+        self.taskConn.send('stop')  # sending 'stop' to DTProcess
+        self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
         self.frameFinished.set(1)
 
     def destroy(self):

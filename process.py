@@ -6,7 +6,7 @@ from multiprocessing.connection import Connection
 
 class DTProcess(Process):
 
-    DEBUG = True
+    DEBUG = False
 
     """ Process for running DTTask-s in parallel to GUI """
     def __init__(self, conn: Connection):

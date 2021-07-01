@@ -32,13 +32,22 @@ dtParameterDesc = {
     'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
                'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
     'refinl': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real,
-               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'}
+               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'},
+    # result target values and tolerances by default
+    'CARRIER FREQUENCY': {'target_value': 'frequency', 'abs_tolerance': kHz, 'rel_tolerance': 1e-4},
+    'INPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
+    'REFOUTPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
+    'INL': {'upper_value': 1},
+    'MODINDEX': {'target_value': 2, 'abs_tolerance': 0.1, 'rel_tolerance': 0.1},
+    'BITERR': {'upper_value': 1},
+    'BITPOWERDIF': {'target_value': 0, 'abs_tolerance': 0.1},
+    'BITFREQDEV': {'target_value': 0, 'abs_tolerance': 1},
+    'THRESHOLD POWER': {'upper_value': -10},
 }
 
 # dict for results desciption
 dtResultDesc = {
     'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'MHz', 'format': '10.6f'},
-    'MODINFREQUENCY': {'ru': 'Вх. частота модуляции', 'en': 'Input mod. frequency', 'dunit': 'Hz', 'format': '5.0f'},
     'INPOWER': {'ru': 'Входная мощность', 'en': 'Input power', 'dunit': 'dBm', 'format': '5.1f'},
     'REFOUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
     'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f'},
@@ -923,14 +932,40 @@ class DTScenario:
 
     def addTask(self, taskType: DTTask):
         if taskType not in dtTaskTypes:
-            raise DTInternalError('DTScenario.addTask()', f'Unknown task type given')
+            raise DTInternalError('DTScenario.addTask()', 'Unknown task type given')
 
         task = taskType()
         task.set_id()  # scenario is created in the main process, set task ID here
         self.tasks.append(task)
 
+    @classmethod
+    def from_dict(cls, d: dict):
+        """Define scenario from dict (read from configuration file)
+        """
+        try:
+            scen = cls(d['name'])
+            for t in d['tasks']:
+                task = dtTaskTypeDict[t['class']]()
+                task.parameters = t['parameters']
+                task.set_id()  # scenario is created in the main process, set task ID here
+                scen.tasks.append(task)
+        except KeyError:
+            raise DTInternalError('DTScenario.fromDict()', 'Wrong dict format')
+        return scen
+
+    def to_dict(self):
+        dtasks = list()
+        d = dict(name=self.name, tasks=dtasks)
+        for task in self.tasks:
+            dtasks.append({'class': task.__class__.__name__,
+                           'parameters': task.parameters})
+        return d
+
     def __getitem__(self, key):
         return self.tasks[key]
+
+    def __setitem__(self, key, item):
+        self.tasks[key] = item
 
     def __len__(self):
         return len(self.tasks)
@@ -962,10 +997,11 @@ class DTScenario:
 def dtTaskInit():
     global dtTaskTypes, dtTaskTypeDict, dtAllScenarios
     dtTaskTypes = list()
-    dtTaskTypeDict = dict(ru=dict(), en=dict())
+    dtTaskTypeDict = dict(cls=dict(), ru=dict(), en=dict())
     dtAllScenarios = dict()
     for taskClass in (DTCalibrate, DTMeasurePower, DTMeasureCarrierFrequency,
                       DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity, DTTest):
         dtTaskTypes.append(taskClass)
-        for lang in dtTaskTypeDict:
-            dtTaskTypeDict[lang][taskClass.name[lang]] = taskClass
+        dtTaskTypeDict['cls'][taskClass.__name__] = taskClass
+        dtTaskTypeDict['ru'][taskClass.name['ru']] = taskClass
+        dtTaskTypeDict['en'][taskClass.name['en']] = taskClass
