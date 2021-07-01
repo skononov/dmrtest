@@ -758,12 +758,6 @@ class DTMeasureSensitivity(DTTask):
         if self.failed:
             return self
 
-        time.sleep(0.5)
-        self.results['THRESHOLD POWER'] = self.rng.normal(10, 1)
-        self.results['STATUS'] = -1
-        self.set_success()
-        return self
-
         self.adcrange = 0
         try:
             attrange = range(1, 64)
