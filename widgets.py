@@ -55,15 +55,13 @@ SMALL_FONT_SIZE = '10'
 class DTApplication(tk.Tk, metaclass=Singleton):
     """ DMR TEST Application built with Tkinter
     """
-    DEBUG = True
+    DEBUG = False
 
     __dtTkOptionFilename = '~/.dtstyle'
 
     def __init__(self):
         if self.DEBUG:
             print(f'DTApplication created in the procees PID {getpid()}')
-
-        DTProcess.DEBUG = True
 
         super().__init__()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
@@ -92,10 +90,13 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
         # set styles
         # plt.style.use('fivethirtyeight')
-        plt.style.use('dark_background')
-        self.defaultStyle()
         if access(DTApplication.__dtTkOptionFilename, R_OK):
             self.readStyle(DTApplication.__dtTkOptionFilename)
+        else:
+            self.defaultStyle()
+            plt.style.use('dark_background')
+        mpl.rcParams['axes.facecolor'] = self.option_get('activeBackground', 'DTApplication')
+        mpl.rcParams['figure.facecolor'] = self.option_get('activeBackground', 'DTApplication')
 
         self.mainMenuFrame = DTMainMenuFrame(self)
         self.mainMenuFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
@@ -300,7 +301,7 @@ class DTPlotFrame(tk.Frame):
                     ax.set_ylabel(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
                     ax.set_xlim(0, max(int(x[n-1]+1), 10))
                 else:
-                    ax.plot(result['x'], result['y'], '.', color=color)
+                    ax.plot(result['x'], result['y'], '-.', color=color)
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
                     ax.set_ylabel(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
@@ -315,7 +316,7 @@ class DTPlotFrame(tk.Frame):
                 result = results[key]
                 n = result['n']
                 x = result['x']
-                ax.lines[0].set_ls('-' if n < 20 else '')
+                ax.lines[0].set_ls('-' if n < 100 else '')
                 ax.lines[0].set_data(x[:n], result['y'][:n])
                 ax.set_xlim(x[0], max(int(x[n-1]+1), 10))
                 ax.relim(True)
@@ -421,12 +422,16 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         textbox.insert(tk.END, text, "normal")
         textbox.configure(state=tk.DISABLED)
 
+    def __setDebug(self):
+        DTApplication.DEBUG = (self.debugVar.get() != 0)
+        self.master.taskConn.send('debugon' if DTApplication.DEBUG else 'debugoff')
+
     def __createMenuFrame(self):
         self.menuFrame = tk.Frame(self, padx=10, pady=10)
 
         for i in range(1, 5):
             self.menuFrame.rowconfigure(i, pad=20)
-        self.menuFrame.rowconfigure(4, weight=1)
+        self.menuFrame.rowconfigure(5, weight=1)
 
         self.scenariosText = tk.StringVar()
         self.scenariosText.set(f'{len(tasks.dtAllScenarios)} сценариев определено')
@@ -452,8 +457,13 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         csb.grid(row=3, sticky=tk.W+tk.E)
         csb.focus()
 
+        self.debugVar = tk.IntVar()
+        cdb = tk.Checkbutton(self.menuFrame, text='Отладка')
+        cdb.configure(variable=self.debugVar, padx=3, command=self.__setDebug)
+        cdb.grid(row=4, sticky=tk.W)
+
         quitb = tk.Button(self.menuFrame, text='Выход', command=self.master.quit, height=2)
-        quitb.grid(row=4, sticky=tk.W+tk.E+tk.S)
+        quitb.grid(row=5, sticky=tk.W+tk.E+tk.S)
 
 
 class DTNewScenarioDialog(tk.Toplevel):
@@ -546,29 +556,6 @@ class DTNewScenarioDialog(tk.Toplevel):
             self.taskListbox.delete(selected[0])
 
 
-class Keyed(type):
-    """
-    Metaclass for defining classes with keyed objects.
-    New objects are created if only new key is supplied, otherwise use previously defined ones.
-    """
-    _instances = {}
-
-    def __call__(cls, *args, ikey=None, **kwargs):
-        if ikey is None:
-            return super(Keyed, cls).__call__(*args, **kwargs)
-        if cls in cls._instances:
-            instances = cls._instances[cls]
-            if ikey not in instances:
-                instances[ikey] = instance = super(Keyed, cls).__call__(*args, **kwargs)
-            else:
-                instance = cls._instances[cls][ikey]
-        else:
-            instance = super(Keyed, cls).__call__(*args, **kwargs)
-            cls._instances[cls] = {ikey: instance}
-
-        return instance
-
-
 class DTTaskFrame(tk.Frame):
     """ A frame rendered in the root window to manage task execution
     """
@@ -577,7 +564,7 @@ class DTTaskFrame(tk.Frame):
             task - DTTask object to be managed
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
         """
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print(f'DTTaskFrame created with for task "{task.name["ru"]}"')
 
         super().__init__(master)
@@ -832,7 +819,7 @@ class DTTaskFrame(tk.Frame):
                                   f'DTProcess is dead, that must not happen while application is running')
 
         if self.tostop.get() == 1:  # stop from the user
-            if DTApplication().DEBUG:
+            if DTApplication.DEBUG:
                 print('DTTaskFrame.__check_process(): User requested stop. Sending stop to DTProcess.')
             self.taskConn.send('stop')  # sending 'stop' to DTProcess
             self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
@@ -840,33 +827,36 @@ class DTTaskFrame(tk.Frame):
             return
 
         self.resultBuffer = list()  # list of last DTTask-s with results
+        runstopped = False
         while self.taskConn.poll():  # new task data are available for retrieving
             msg = self.taskConn.recv()  # retrieve task object
             if isinstance(msg, DTTask) and msg.id == self.task.id:
                 self.resultBuffer.append(msg)
             elif msg == self.stoppedMsg:  # task run finished
-                if DTApplication().DEBUG:
+                if DTApplication.DEBUG:
                     print('DTTaskFrame.__check_process(): Task run finished')
                 self.__configStartButton()  # return start button to initial state
-                return
+                runstopped = True
+                break
 
         if len(self.resultBuffer) > 0:
-            if DTApplication().DEBUG:
+            if DTApplication.DEBUG:
                 print(f'DTTaskFrame.__check_process(): Updating frame with task results')
             try:
                 self.__update()
             except Exception as exc:
-                if DTApplication().DEBUG:
+                if DTApplication.DEBUG:
                     print('DTTaskFrame.__check_process(): Exception caught during frame update. Stopping task run.')
                 self.taskConn.send('stop')
                 self.__flushPipe()
                 self.__configStartButton()
                 raise exc
 
-        self.after(100, self.__check_process)
+        if not runstopped:
+            self.after(100, self.__check_process)
 
     def __runTask(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__runTask() entered')
         self.tostop.set(0)
         self.message.configure(text='')
@@ -887,13 +877,13 @@ class DTTaskFrame(tk.Frame):
 
         self.__configStopButton()
 
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__runTask(): Schedule __check_process()')
         self.after(100, self.__check_process())
 
     def __flushPipe(self):
         fd = self.taskConn.fileno()
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print(f'DTTaskFrame.__flushPipe(): flushing read buffer of fd {fd}')
         FileIO(fd, 'r', closefd=False).flush()
 
@@ -904,32 +894,32 @@ class DTTaskFrame(tk.Frame):
         self.startButton.configure(text='Остановить', command=self.__stopTask, bg='#A50D00', activebackground='#C63519')
 
     def __stopTask(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__stopTask(): Stop button is pressed')
         self.tostop.set(1)
 
     def __goPrev(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__goPrev(): Signalling task stop')
         self.direction = -1
         self.tostop.set(1)
         self.frameFinished.set(1)
 
     def __goNext(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__goNext(): Signalling task stop')
         self.direction = 1
         self.tostop.set(1)
         self.frameFinished.set(1)
 
     def __goMainMenu(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.__goMainMenu(): Signalling task stop')
         self.direction = 0
         self.tostop.set(1)
         self.frameFinished.set(1)
 
     def destroy(self):
-        if DTApplication().DEBUG:
+        if DTApplication.DEBUG:
             print('DTTaskFrame.destroy(): called')
         super().destroy()
