@@ -12,7 +12,6 @@ from multiprocessing import Pipe
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from dtexcept import DTInternalError
 from process import DTProcess
 from config import DTConfiguration, __appname__, __version__
 from tasks import DTScenario, DTTask, dtTaskInit, dtParameterDesc, dtResultDesc
@@ -132,27 +131,14 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*Entry.font', f'{MONOSPACE_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
         self.option_add('*Spinbox.font', f'{MONOSPACE_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
 
-        # self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        # self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        # self.option_add('*DTLogoFrame.background', DEFAULT_BG_COLOR)
-        # self.option_add('*DTMainMenuFrame.background', DEFAULT_BG_COLOR)
-        # self.option_add('*DTPlotFrame.background', DEFAULT_BG_COLOR)
-        # self.option_add('*Label.background', DEFAULT_BG_COLOR)
-        # self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
-        # self.option_add('*Menu.background', _lightBG)
-        # self.option_add('*Button.activebackground', HIGHLIGHTED_BG_COLOR)
-        # self.option_add('*Menubutton.activebackground', HIGHLIGHTED_BG_COLOR)
-        # self.option_add('*Menu.activebackground', HIGHLIGHTED_BG_COLOR)
-        # self.option_add('*Label.foreground', DEFAULT_FG_COLOR)
-        # self.option_add('*Button.foreground', DEFAULT_FG_COLOR)
-        # self.option_add('*Menubutton.foreground', DEFAULT_FG_COLOR)
-
     def run(self):
         self.mainloop()
+
         if self.DEBUG:
             print('DTApplication.run(): exit event loop')
-        self.taskConn.send('terminate')
-        self.taskProcess.join()
+        if self.taskProcess.is_alive():
+            self.taskConn.send('terminate')
+            self.taskProcess.join()
         self.taskConn.close()
 
     def showMessage(self, message: str, master=None, delay=0, status='default'):
@@ -169,6 +155,7 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         if delay == 0:
             tk.Button(w, text='ОК', command=lambda: (w.grab_release(), w.destroy()), padx=20, pady=5)\
                 .grid(row=1, column=0, columnspan=2, sticky=tk.S, pady=10)
+            w.wait_window(w)
         else:
             self.after(int(delay*1000), lambda: (w.grab_release(), w.destroy()))
 
@@ -179,8 +166,6 @@ class DTChooseObjectMenu(tk.Menu):
     def __init__(self, menubutton, command, objects):
         super().__init__(menubutton, tearoff=0, postcommand=self.composeMenu)
         self.command = command
-        if objects is None:
-            raise DTInternalError(self.__class__.__name__, 'objects must not be None')
         self.objects = objects
         self.locName = False
         self.isDict = False
@@ -192,7 +177,10 @@ class DTChooseObjectMenu(tk.Menu):
             if hasattr(self.objects, '__getitem__'):
                 self.isSubscriptable = True
         else:
-            raise DTInternalError(self.__class__.__name__, f'Called for invalid type {type(self.objects)}')
+            DTApplication().showMessage('Ошибка приложения. Требуется перезапуск.\n' +
+                                        self.__class__.__name__ + f': Called for invalid type {type(self.objects)}',
+                                        status='error')
+            DTApplication().quit()
 
     def composeMenu(self):
         self.delete(0, tk.END)
@@ -210,7 +198,11 @@ class DTChooseObjectMenu(tk.Menu):
             elif hasattr(obj, 'name') and isinstance(obj.name, str):
                 locName = False
             else:
-                raise DTInternalError(self.__class__.__name__, f'No name defined for the object of type {type(obj)}')
+                DTApplication().showMessage('Ошибка приложения. Требуется перезапуск.\n' +
+                                            self.__class__.__name__ + f': No name defined for the object of type {type(obj)}',
+                                            status='error')
+                DTApplication().quit()
+                return
             self.optVar = tk.IntVar()
             for index, obj in enumerate(self.objects):
                 self.add_radiobutton(label=obj.name[dtg.LANG] if locName else obj.name, indicatoron=False,
@@ -348,7 +340,8 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
 
     def __runScenario(self, scenario: DTScenario):
         if len(scenario) == 0:
-            raise DTInternalError('DTMainMenuFrame.__runScenario()', f'Empty scenario {scenario.name}.')
+            DTApplication().showMessage('Сценарий без задач!', status='error')
+            return
 
         self.grid_forget()
         index = 0
@@ -621,7 +614,7 @@ class DTTaskFrame(tk.Frame):
         resultTolFrame.grid(row=1, sticky=tk.W+tk.E+tk.N)
 
         self.parvars = dict()
-        self.wpars = dict()
+        # self.wpars = dict()
 
         irow = 0
         for par in self.task.parameters:
@@ -636,10 +629,10 @@ class DTTaskFrame(tk.Frame):
             tk.Label(paramFrame, text=pname+':').grid(row=irow, column=0, sticky=tk.E)
 
             parvar = tk.StringVar()
-            if ptype is Integral:
+            if ptype is Integral and isinstance(pvalue, Integral):
                 dvalue = str(int(pvalue))
             else:
-                dvalue = str(pvalue).replace('.', ',')
+                dvalue = str(pvalue)
             parvar.set(dvalue)
 
             self.parvars[par] = parvar
@@ -650,7 +643,7 @@ class DTTaskFrame(tk.Frame):
             entry = tk.Spinbox(paramFrame, textvariable=parvar)
             entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
                             justify=tk.RIGHT, format='%'+pformat)
-            self.wpars[str(entry)] = par
+            # self.wpars[str(entry)] = par
             entry.bind('<Button>', self.__scrollPar)
             entry.bind('<Key>', self.__scrollPar)
             if pavalues is not None:
@@ -796,7 +789,10 @@ class DTTaskFrame(tk.Frame):
             return
         elif lastResult.completed:
             self.progress += len(self.resultBuffer)
-            self.message.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
+            if lastResult.message:
+                self.message.configure(text=lastResult.message, foreground='yellow')
+            else:
+                self.message.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
         elif lastResult.inited:
             self.message.configure(text='ГОТОВ', foreground='green')
             return
@@ -858,8 +854,11 @@ class DTTaskFrame(tk.Frame):
 
     def __check_process(self):
         if not self.taskProcess.is_alive():  # unexpected stop of DTProcess
-            raise DTInternalError(self.__class__.__name__,
-                                  f'DTProcess is dead, that must not happen while application is running')
+            DTApplication().showMessage('Ошибка приложения. Требуется перезапуск.\n' +
+                                        self.__class__.__name__ + 'DTProcess is dead, that must not happen while application is running.',
+                                        status='error')
+            DTApplication().quit()
+            return
 
         if self.tostop.get() == 1:  # stop from the user
             if DTApplication.DEBUG:
@@ -911,8 +910,7 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame.clearCanvas()
 
         for par in self.parvars:
-            pvalue = float(self.parvars[par].get().replace(',', '.'))
-            self.task.set_conv_par(par, pvalue)
+            self.task.set_conv_par(par, self.parvars[par].get())
 
         self.task.set_id(self.task.id+1)
         self.stoppedMsg = f'stopped {self.task.id}'

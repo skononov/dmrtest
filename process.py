@@ -1,3 +1,4 @@
+import tasks
 from tasks import DTTask
 from dtcom import DTSerialCom
 from multiprocessing import Process
@@ -27,7 +28,7 @@ class DTProcess(Process):
                     print('DTProcess: Terminate command received')
                 break
             elif obj == 'debugon':
-                DTSerialCom.DEBUG = self.DEBUG = True
+                tasks.DEBUG = DTSerialCom.DEBUG = self.DEBUG = True
                 print('DTProcess: DEBUG on')
             elif obj == 'debugoff':
                 DTSerialCom.DEBUG = self.DEBUG = False
