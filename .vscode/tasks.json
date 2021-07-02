@@ -14,6 +14,26 @@
             }
         },
         {
+            "label": "make clean",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "clean",
+            ],
+            "problemMatcher": [],
+            "group": "none",
+        },
+        {
+            "label": "make depclean",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "depclean",
+            ],
+            "problemMatcher": [],
+            "group": "none",
+        },
+        {
             "type": "cppbuild",
             "label": "C/C++: gcc сборка активного файла",
             "command": "/usr/bin/gcc",

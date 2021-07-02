@@ -15,17 +15,19 @@ dtTaskTypes = None
 dtTaskTypeDict = None
 dtAllScenarios = None
 
+DEBUG = False
+
 # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
 dtParameterDesc = {
     'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real,
             'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB', 'format': '4.1f'},
     'avenum': {'ru': 'N точек усреднения', 'en': 'Averaging points', 'type': Integral,
-               'lowlim': 1, 'uplim': 4096, 'increment': 10, 'dunit': '1', 'format': '4.0f'},
+               'lowlim': 1, 'uplim': 4096, 'increment': 1, 'dunit': '1', 'format': '4.0f'},
     'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral,
-                'lowlim': 4, 'uplim': 16384, 'values': list(2**np.arange(2, 15)), 'dunit': '1', 'format': '5.0f'},
-    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Real,  # it is displayed as float number
+                'lowlim': 4, 'uplim': 16384, 'increment': 2, 'dunit': '1', 'format': '5.0f'},
+    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral,
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Real,  # it is displayed as float number
+    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real,
                'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
@@ -161,14 +163,19 @@ class DTTask:
         except KeyError:
             return None
         mult = dtg.units[pardesc['dunit']]['multiple']
+        dvalue = int(value) if mult == 1 and pardesc['type'] is Integral else value / mult
         increment = pardesc['increment']/mult if 'increment' in pardesc else None
         avalues = [val/mult for val in pardesc['values']] if 'values' in pardesc else None
-        return (pardesc[dtg.LANG], pardesc['type'], value/mult, pardesc['lowlim']/mult,
+        return (pardesc[dtg.LANG], pardesc['type'], dvalue, pardesc['lowlim']/mult,
                 pardesc['uplim']/mult, increment, avalues,
                 pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG])
 
     def set_conv_par(self, par, value):
-        self.parameters[par] = value * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+        if dtParameterDesc[par]['type'] is Real:
+            value = float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+        elif dtParameterDesc[par]['type'] is Integral:
+            value = int(float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple'])
+        self.parameters[par] = value
 
     def get_conv_res(self, res):
         try:
@@ -208,7 +215,6 @@ class DTTask:
     def set_success(self):
         self.failed = False
         self.completed = True
-        self.message = 'Успешно' if dtg.LANG == 'ru' else 'Success'
         if self.start == 0.:
             self.start = time.perf_counter()
         self.time = time.perf_counter() - self.start
@@ -218,13 +224,18 @@ class DTTask:
         self.completed = False
         if prependmsg:
             self.message = message + ':\n' + self.message
-        elif message != '':
+        elif message:
             self.message = message
 
-    def set_eval_error(self):
+    def set_eval_error(self, message: str = None):
         self.failed = True
         self.completed = False
-        self.message = 'Ошибка вычисления' if dtg.LANG == 'ru' else 'Evaluation error'
+        self.message = 'Ошибка измерения' if dtg.LANG == 'ru' else 'Measurement error'
+        if message:
+            self.message += ':\n' + message
+
+    def set_message(self, message: str):
+        self.message = message
 
     def set_com_error(self, exc: DTComError):
         self.failed = True
@@ -393,8 +404,7 @@ class DTMeasureCarrierFrequency(DTTask):
             return self
 
         cfreq = self.__eval_carrier_freq()
-        if cfreq is None:
-            self.set_eval_error()
+        if self.failed:
             return self
 
         self.results['CARRIER FREQUENCY'] = cfreq
@@ -405,6 +415,7 @@ class DTMeasureCarrierFrequency(DTTask):
 
     def __eval_carrier_freq(self):
         if self.buffer is None or self.buffer0.size != self.buffer.size != self.parameters['datanum']:
+            self.set_eval_error('Inconsistent data buffer size')
             return None
 
         N = self.parameters['datanum']
@@ -416,7 +427,8 @@ class DTMeasureCarrierFrequency(DTTask):
         poff, foff = get_peak(aoff, 0, len(aoff)-1)
 
         if p0 == 0 or poff == 0:  # could not find peaks
-            return None
+            self.set_message('Сигнал несущей не обнаружен' if dtg.LANG == 'ru' else 'No carrier signal')
+            return 0
 
         f0 = f0/N*adcSampleFrequency - self.foffset0  # Hz
         foff = foff/N*adcSampleFrequency - self.foffset  # Hz
@@ -429,8 +441,10 @@ class DTMeasureCarrierFrequency(DTTask):
             return F + 0.5*(f0+dF-foff)
         elif dF < f0 > foff:
             return F + 0.5*(f0+dF+foff)
-        else:  # non-consistent measurements
-            return None
+        else:  # inconsistent measurements
+            self.set_message('Ошибка в вычислении несущей частоты' if dtg.LANG == 'ru'
+                             else 'Error in evaluating carrier frequency')
+            return 0
 
 
 class DTMeasureNonlinearity(DTTask):
@@ -543,7 +557,7 @@ class DTDMRInput(DTTask):
         # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
         self.bufsize = 255*2*25*2
         # length of array for FFT analysis
-        self.fftlen = 100
+        self.fftlen = 128
 
         self.results['BITERR'] = None
         self.results['BITFREQDEV'] = None
@@ -632,10 +646,10 @@ class DTDMRInput(DTTask):
         phases = np.array([0, np.pi/2]*4)
         num = len(It)
 
-        bestamp = np.zeros(4, dtype=float)  # 0,2 - 648 Hz, 1,3 - 1944 Hz
-        bestpos = np.empty(4, dtype=int)
+        bestamp = np.zeros(4, dtype='float32')  # 0,2 - 648 Hz, 1,3 - 1944 Hz
+        bestpos = np.empty(4, dtype='int32')
 
-        amp = np.zeros(8, dtype=float)
+        amp = np.zeros(8, dtype='float32')
 
         for i in range(self.fftlen):
             amp += np.array([It[i]]*4+[Qt[i]]*4)*np.sin(ww*i+phases)
@@ -646,40 +660,70 @@ class DTDMRInput(DTTask):
                    np.array([It[i]]*4 + [Qt[i]]*4) * np.sin(ww*i+phases)
             self.__update_best_point(amp, i, bestamp, bestpos)
 
-        bestpos = np.fmin(num-self.fftlen//2-1, np.fmax(self.fftlen//2+1, bestpos))
+        # in-place clipping bestpos with minimum and maximum values
+        np.clip(bestpos, self.fftlen//2+1, num-self.fftlen//2-1, bestpos)
 
         return bestpos
 
-    def __dmr_analysis(self):
-        if self.buffer is None or len(self.buffer) != self.busize:
+    # just for testing
+    def dmr_analysis(self):
+        return self.__dmr_analysis(True)
+
+    def __dmr_analysis(self, debug=False):
+        """ Do analysis of a random symbol sequence sent by the device.
+            Extract maximum frequency deviation of a symbol and power difference between symbols.
+        """
+        if self.buffer is None or len(self.buffer) != self.bufsize:
             return None
 
+        # preparing data for Blackman window application
         bwin = blackman(self.fftlen)
         bwin /= np.sqrt(sum(bwin**2)/self.fftlen)
 
         It = self.buffer[:self.bufsize//2]
         Qt = self.buffer[self.bufsize//2:]
 
+        # subtract the DC component
+        It -= np.around(np.mean(It)).astype('int32')
+        Qt -= np.around(np.mean(Qt)).astype('int32')
+
+        # determine the best central points for analysing each of 4 symbols
         bestpos = self.__get_best_symbol_points(It, Qt)
+
+        if debug:
+            print('Best symbol points:', bestpos)
 
         pwr = np.zeros(4, float)
         fpeak = np.zeros(4, float)
 
+        If = [None]*4
+        Qf = [None]*4
+
         for i in range(4):
-            Itr = It[bestpos[i]-self.fftlen/2:bestpos[i]+self.fftlen/2]
-            Qtr = Qt[bestpos[i]-self.fftlen/2:bestpos[i]+self.fftlen/2]
+            Itr = It[bestpos[i]-self.fftlen//2:bestpos[i]+self.fftlen//2]
+            Qtr = Qt[bestpos[i]-self.fftlen//2:bestpos[i]+self.fftlen//2]
 
-            If = 2/self.fftlen*np.abs(rfft(bwin*Itr))
-            Qf = 2/self.fftlen*np.abs(rfft(bwin*Qtr))
+            If[i] = 2/self.fftlen*np.abs(rfft(bwin*Itr))
+            Qf[i] = 2/self.fftlen*np.abs(rfft(bwin*Qtr))
 
-            amp = np.sqrt(If**2 + Qf**2)
+            amp = np.sqrt(If[i]**2 + Qf[i]**2)
             pwr[i], fpeak[i] = get_peak(amp, int(self.refFreq[i]*0.9), int(self.refFreq[i]*1.1))
 
         fdev = np.abs(fpeak-self.refFreq)
         ampf = np.sqrt(pwr)
         min_ampf, max_ampf = min(ampf), max(ampf)
+        if DEBUG:
+            print('Frequency peaks [Hz]:', fpeak)
+            print('Frequency deviations [Hz]:', fdev)
+            print('Amplitude of symbols:', ampf)
 
-        return fdev, 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
+        maxfdev = np.max(fdev)
+        ampdiff = 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
+
+        if debug:
+            return maxfdev, ampdiff, bestpos, If, Qf
+        else:
+            return maxfdev, ampdiff
 
 
 class DTDMROutput(DTTask):

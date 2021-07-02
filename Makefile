@@ -21,7 +21,7 @@ ${EXECS}: %: %.o
 %.o: %.c
 	${CC} ${CFLAGS} -c $< -o $@
 
-libdmr.so: pll.o inl.o serial.o
+libdmr.so: pll.o inl.o ber.o serial.o 
 	${LD} ${LDFLAGS} -shared $^ -o $@
 
 testpll: pll.o
@@ -29,7 +29,7 @@ testpll: pll.o
 testser: serial.o pll.o
 
 %.c.d: %.c
-	@echo "Generating dependencies for $<"    
+	@echo "Generating dependencies for $<"
 	@$(CC) -MM $(CFLAGS) $< -MF $@
 
 ifeq ($(findstring clean,$(MAKECMDGOALS)),)

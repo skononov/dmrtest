@@ -43,3 +43,17 @@ def get_inl(amp, fm):
     if rc == c_int(0):
         return None, None
     return c_inl.value, c_h.value
+
+
+def get_ber(iamp, qamp):
+    """ Calculate number of total and erroneously decoded symbols
+    """
+    c_size = c_int(len(iamp))
+    c_iamp = (c_double*len(iamp))(*iamp)
+    c_qamp = (c_double*len(iamp))(*qamp)
+    c_numerr = c_int(0)
+    c_numbit = c_int(0)
+    rc = _libdmr.bercalc(c_iamp, c_qamp, c_size, byref(c_numerr), byref(c_numbit))
+    if rc == c_int(0):
+        return None, None
+    return c_numerr.value, c_numbit.value
