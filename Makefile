@@ -8,8 +8,9 @@ SOURCES:=pll.c inl.c ber.c serial.c
 DEPS:=$(SOURCES:.c=.c.d)
 EXECS:=testser testpll
 TARGETS:=${EXECS} libdmr.so
+LIBDIR:=${HOME}/dmr/lib
 
-.PHONY: lib all clean
+.PHONY: lib all install clean depclean
 
 all: ${TARGETS}
 
@@ -35,6 +36,11 @@ testser: serial.o pll.o
 ifeq ($(findstring clean,$(MAKECMDGOALS)),)
   -include $(DEPS)
 endif
+
+install: libdmr.so
+	@echo "Installing $^ to ${LIBDIR}"
+	@mkdir -p ${LIBDIR}
+	@cp -a $^ ${LIBDIR}
 
 clean:
 	rm -f *.o ${TARGETS}

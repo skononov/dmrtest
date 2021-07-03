@@ -1,5 +1,5 @@
 from numbers import Integral
-from os import access, R_OK, getpid
+from os import access, R_OK, getpid, getenv
 from io import FileIO
 from tkinter.constants import SUNKEN
 import numpy as np
@@ -73,8 +73,10 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
 
-        if access('img/logo.gif', R_OK):
-            self.logo = tk.PhotoImage(file='img/logo.gif')
+        self.imgdir = getenv('HOME')+'/dmr/img'
+
+        if access(self.imgdir + '/logo.gif', R_OK):
+            self.logo = tk.PhotoImage(file=self.imgdir + '/logo.gif')
         else:
             self.logo = None
 
@@ -715,7 +717,7 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 4.2))
         self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
-        self.plotimg = tk.PhotoImage(file='img/plot.gif')
+        self.plotimg = tk.PhotoImage(file=self.imgdir + '/plot.gif')
 
         self.reslabels = dict()  # labels with results
         self.plotvars = dict()  # states of checkboxes controlling what vars to plot

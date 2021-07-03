@@ -1,7 +1,9 @@
 from ctypes import cdll, c_double, c_uint, c_int, byref
+# from ctypes.util import find_library # does not work with LD_LIBRARY_PATH
 from numpy import array
+from os import getenv
 
-_libdmr = cdll.LoadLibrary("./libdmr.so")
+_libdmr = cdll.LoadLibrary(getenv("HOME") + "/dmr/lib/libdmr.so")
 
 
 def get_pll_regs(freq: int):
