@@ -1,6 +1,7 @@
 from numbers import Integral
 from os import access, R_OK, getpid
 from io import FileIO
+from tkinter.constants import SUNKEN
 import numpy as np
 from scipy.fft import rfftfreq
 import matplotlib as mpl
@@ -353,8 +354,9 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
                 state = 'first'
             elif index == len(scenario)-1:
                 state = 'last'
-            task = scenario[index]
+            task: DTTask = scenario[index]
             taskFrame = DTTaskFrame(self.master, task, state)
+            task.load_cal()
             scenario[index] = taskFrame.task  # update scenario task
             taskFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
             taskFrame.wait_variable(taskFrame.frameFinished)
@@ -380,7 +382,8 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
             self.scenariosText.set(f'{nscenarios} сценариев определено')
 
     def __chooseTask(self, taskType: DTTask):
-        task = taskType()
+        task: DTTask = taskType()
+        task.load_cal()
         task.set_id()  # set task ID in the main process
         taskFrame = DTTaskFrame(self.master, task)
         self.grid_forget()
@@ -616,7 +619,6 @@ class DTTaskFrame(tk.Frame):
         resultTolFrame.grid(row=1, sticky=tk.W+tk.E+tk.N)
 
         self.parvars = dict()
-        # self.wpars = dict()
 
         irow = 0
         for par in self.task.parameters:
@@ -626,7 +628,7 @@ class DTTaskFrame(tk.Frame):
 
             paramFrame.rowconfigure(irow, pad=10)
 
-            pname, ptype, pvalue, plowlim, puplim, pincr, pavalues, pformat, punit = partuple
+            pname, ptype, pvalue, plowlim, puplim, pincr, pavalues, pformat, punit, preadonly = partuple
 
             tk.Label(paramFrame, text=pname+':').grid(row=irow, column=0, sticky=tk.E)
 
@@ -639,19 +641,20 @@ class DTTaskFrame(tk.Frame):
 
             self.parvars[par] = parvar
 
-            # entry = tk.Entry(paramFrame, width=12, textvariable=parvar,
-            #                 justify=tk.RIGHT)
-
-            entry = tk.Spinbox(paramFrame, textvariable=parvar)
-            entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
-                            justify=tk.RIGHT, format='%'+pformat)
-            # self.wpars[str(entry)] = par
-            entry.bind('<Button>', self.__scrollPar)
-            entry.bind('<Key>', self.__scrollPar)
-            if pavalues is not None:
-                entry.configure(values=pavalues)
-            else:  # use increment
-                entry.configure(increment=pincr)
+            if preadonly:
+                entry = tk.Label(paramFrame, textvariable=parvar)
+                entry.configure(width=12, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
+                                justify=tk.RIGHT, relief=tk.SUNKEN)
+            else:
+                entry = tk.Spinbox(paramFrame, textvariable=parvar)
+                entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
+                                justify=tk.RIGHT, format='%'+pformat)
+                entry.bind('<Button>', self.__scrollPar)
+                entry.bind('<Key>', self.__scrollPar)
+                if pavalues is not None:
+                    entry.configure(values=pavalues)
+                else:  # use increment
+                    entry.configure(increment=pincr)
 
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
@@ -835,15 +838,22 @@ class DTTaskFrame(tk.Frame):
                 if value is not None:
                     fmt = f'%{dtResultDesc[res]["format"]}'
                     if isinstance(self.task, tasks.DTMeasureSensitivity) and res == 'THRESHOLD POWER':
-                        reslabel.configure(fg='red')
                         if lastResult.results['STATUS'] == -1:  # actual thr. power is lower
+                            reslabel.configure(fg='red')
                             fmt = '<' + fmt
                         elif lastResult.results['STATUS'] == 1:  # actual thr. power is higher
+                            reslabel.configure(fg='red')
                             fmt = '>' + fmt
                         elif lastResult.results['STATUS'] == 2:  # fluctuations
+                            reslabel.configure(fg='red')
                             fmt = '~' + fmt
                         else:
                             reslabel.configure(fg='green')
+
+                    if isinstance(self.task, tasks.DTMeasurePower) and res == 'OUTPOWER':
+                        # store calibration of output power to global parameters
+                        dtParameterDesc['refoutpower']['default'] = value
+                        dtParameterDesc['refatt']['default'] = self.task.parameters['att']
 
                     reslabel['text'] = fmt % value
                 else:

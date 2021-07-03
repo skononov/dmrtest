@@ -35,10 +35,14 @@ dtParameterDesc = {
     #            'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
     'refinl': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real, 'default': 5,
                'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'},
+    'refatt': {'ru': 'Опорное ослабление', 'en': 'Reference attenuation', 'type': Real, 'default': 31.5,
+               'dunit': 'dB', 'format': '4.1f', 'readonly': True},
+    'refoutpower': {'ru': 'Опорная вых. мощность', 'en': 'Ref. output power', 'type': Real, 'default': 1,
+                    'dunit': 'dBm', 'format': '5.1f', 'readonly': True},
     # result target values and tolerances by default
     'CARRIER FREQUENCY': {'target_value': 'frequency', 'abs_tolerance': kHz, 'rel_tolerance': 1e-4},
     'INPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
-    'REFOUTPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
+    'OUTPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
     'INL': {'upper_value': 1},
     'MODINDEX': {'target_value': 2, 'abs_tolerance': 0.1, 'rel_tolerance': 0.1},
     'BITERR': {'upper_value': 1},
@@ -51,7 +55,7 @@ dtParameterDesc = {
 dtResultDesc = {
     'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'MHz', 'format': '10.6f'},
     'INPOWER': {'ru': 'Входная мощность', 'en': 'Input power', 'dunit': 'dBm', 'format': '5.1f'},
-    'REFOUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
+    'OUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
     'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f'},
     'MODINDEX': {'ru': 'Индекс модуляции', 'en': 'Modulation index', 'dunit': '1', 'format': '4.2f'},
     'BITERR': {'ru': 'Ошибки битов', 'en': 'Bit errors', 'dunit': '%', 'format': '5.1f'},
@@ -78,10 +82,24 @@ class DTTask:
     # name of the task
     name = dict(ru='Базовая задача', en='Base task')
 
-    def __init__(self):
+    def __init__(self, parameters=None, results=None):
         """Constructor"""
-        self.parameters = dict()  # parameter values of the task
-        self.results = dict()  # results of the task
+        global dtParameterDesc
+        # parameter values of the task
+        if parameters is None:
+            self.parameters = dict()
+        else:
+            self.parameters = dict.fromkeys(parameters)
+            for par in parameters:
+                if par in dtParameterDesc:
+                    self.parameters[par] = dtParameterDesc[par]['default']
+
+        # results of the task
+        if results is None:
+            self.results = dict()
+        else:
+            self.results = dict.fromkeys(results, None)
+
         self.message = ''  # message to be shown after execution
         self.failed = False  # if last task call is failed
         self.inited = False  # init_meas successfully completed
@@ -91,22 +109,30 @@ class DTTask:
         self.start = self.time = 0  # time of measurements
         self.id = None  # ID of the task (set once in the main process)
 
+    def load_cal(self):
+        """ This method can be implemented to load calibration from some storage or from dtParameterDesc
+        """
+        pass
+
     def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device just before the task run
         """
         self.failed = self.completed = self.inited = False
         self.message = ''
         self.start = self.time = 0
-        try:
-            self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
-        except DTComError as exc:
-            self.set_com_error(exc)
-            return self
+        if 'autotest' not in kwargs:  # do not establish communication with the device for autotest tasks
+            try:
+                self.com = DTSerialCom()  # serial communication instance (initialised only once as DTSerialCom is singleton)
+            except DTComError as exc:
+                self.set_com_error(exc)
+                return self
         for par in kwargs:
             if par in self.parameters:
                 self.parameters[par] = kwargs[par]
         if not self.check_all_parameters():
             self.set_error('Ошибка ввода параметров' if dtg.LANG == 'ru' else 'Parameter enter error')
+        for res in self.results:
+            self.results[res] = None
         return self
 
     def measure(self):
@@ -129,7 +155,7 @@ class DTTask:
         pardata = dtParameterDesc[par]
         if pardata['type'] is Integral and value != int(value):
             return False
-        if value > pardata['uplim'] or value < pardata['lowlim']:
+        if 'uplim' in pardata and (value > pardata['uplim'] or value < pardata['lowlim']):
             return False
         return True
 
@@ -157,6 +183,7 @@ class DTTask:
             return None
 
     def get_conv_par_all(self, par):
+        global dtParameterDesc
         try:
             pardesc = dtParameterDesc[par]
             value = self.parameters[par]
@@ -164,27 +191,33 @@ class DTTask:
             return None
         mult = dtg.units[pardesc['dunit']]['multiple']
         dvalue = int(value) if mult == 1 and pardesc['type'] is Integral else value / mult
+        lowlim = pardesc['lowlim']/mult if 'lowlim' in pardesc else None
+        uplim = pardesc['uplim']/mult if 'uplim' in pardesc else None
         increment = pardesc['increment']/mult if 'increment' in pardesc else None
         avalues = [val/mult for val in pardesc['values']] if 'values' in pardesc else None
-        return (pardesc[dtg.LANG], pardesc['type'], dvalue, pardesc['lowlim']/mult,
-                pardesc['uplim']/mult, increment, avalues,
-                pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG])
+        return (pardesc[dtg.LANG], pardesc['type'], dvalue, lowlim,
+                uplim, increment, avalues,
+                pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG], 'readonly' in pardesc)
 
     def set_conv_par(self, par, value):
+        global dtParameterDesc
         if dtParameterDesc[par]['type'] is Real:
             value = float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
         elif dtParameterDesc[par]['type'] is Integral:
             value = int(float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple'])
         self.parameters[par] = value
+        if par in dtParameterDesc and 'readonly' not in dtParameterDesc[par]:
+            dtParameterDesc[par]['default'] = value
 
     def get_conv_res(self, res):
+        global dtResultDesc
         try:
             return self.results[res] / dtg.units[dtResultDesc[res]['dunit']]['multiple']
         except (KeyError, TypeError):
             return None
 
     def results_from(self, src):
-        """ Copy (by ref) result fields only to this instance from a given one
+        """ Copy (by ref) results to this instance from a given one
         """
         if isinstance(src, DTTask):
             self.id = src.id
@@ -267,8 +300,8 @@ class DTCalibrate(DTTask):
         super().__init__()
         self.single = True
 
-    def init_meas(self, **kwargs):
-        super().init_meas(**kwargs)
+    def init_meas(self):
+        super().init_meas()
         if self.failed:
             return self
 
@@ -299,13 +332,8 @@ class DTMeasurePower(DTTask):
     """
     name = dict(ru='Измерение входной/выходной мощности', en='Measuring input&output power')
 
-    def __init__(self, avenum: int = 64, att: float = 31.5):
-        super().__init__()
-        self.parameters['avenum'] = int(avenum)
-        self.parameters['att'] = float(att)
-
-        self.results['REFOUTPOWER'] = None
-        self.results['INPOWER'] = None
+    def __init__(self):
+        super().__init__(('avenum', 'att'), ('OUTPOWER', 'INPOWER'))
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -326,8 +354,8 @@ class DTMeasurePower(DTTask):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['REFOUTPOWER'] = None
-        self.results['INPOWER'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -337,7 +365,7 @@ class DTMeasurePower(DTTask):
             self.set_com_error(exc)
             return self
 
-        self.results['REFOUTPOWER'] = pwrs[0]
+        self.results['OUTPOWER'] = pwrs[0]
         self.results['INPOWER'] = pwrs[1]
 
         self.set_success()
@@ -352,14 +380,9 @@ class DTMeasureCarrierFrequency(DTTask):
 
     name = dict(ru='Измерение несущей', en='Measuring carrier')
 
-    def __init__(self, frequency: int = 200*MHz, datanum: int = 16384):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        self.parameters['datanum'] = int(datanum)
+    def __init__(self):
+        super().__init__(('frequency', 'datanum'), ('CARRIER FREQUENCY', 'IFFT'))
         self.buffer = None
-
-        self.results['CARRIER FREQUENCY'] = None
-        self.results['IFFT'] = None
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -378,8 +401,8 @@ class DTMeasureCarrierFrequency(DTTask):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['CARRIER FREQUENCY'] = None
-        self.results['IFFT'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -467,16 +490,9 @@ class DTMeasureNonlinearity(DTTask):
     """
     name = dict(ru='Измерение КНИ', en='THD measurement')
 
-    def __init__(self, frequency: int = 200*MHz, modamp: int = 50, modfrequency: int = 10*kHz, datanum: int = 16384):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        self.parameters['modamp'] = float(modamp)
-        self.parameters['modfrequency'] = int(modfrequency)
-        self.parameters['datanum'] = int(datanum)
-
-        self.results['IFFT'] = None
-        self.results['INL'] = None
-        self.results['MODINDEX'] = None
+    def __init__(self):
+        super().__init__(('frequency', 'modamp', 'modfrequency', 'datanum'),
+                         ('INL', 'MODINDEX', 'IFFT', 'QFFT'))
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -505,9 +521,8 @@ class DTMeasureNonlinearity(DTTask):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['INL'] = None
-        self.results['MODINDEX'] = None
-        self.results['IFFT'] = self.results['QFFT'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -569,19 +584,14 @@ class DTDMRInput(DTTask):
 
     refFreq = np.array([symbolDevFrequency, 3*symbolDevFrequency]*2)
 
-    def __init__(self, frequency: int = 200*MHz):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        # self.parameters['bitnum'] = int(bitnum)
+    def __init__(self):
+        super().__init__(('frequency',), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
 
         # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
         self.bufsize = 255*2*25*2
-        # length of array for FFT analysis
-        self.fftlen = 128
 
-        self.results['BITERR'] = None
-        self.results['BITFREQDEV'] = None
-        self.results['BITPOWERDIF'] = None
+        # length of array for FFT analysis
+        # self.fftlen = 128
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -605,9 +615,8 @@ class DTDMRInput(DTTask):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['BITERR'] = None
-        self.results['BITFREQDEV'] = None
-        self.results['BITPOWERDIF'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -784,10 +793,8 @@ class DTDMROutput(DTTask):
     """
     name = dict(ru='Выход ЦР', en='DMR Output')
 
-    def __init__(self, frequency: int = 200*MHz, att: int = 1):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        self.parameters['att'] = int(att)
+    def __init__(self):
+        super().__init__(('frequency', 'att'))
         self.single = True
 
     def init_meas(self, **kwargs):
@@ -821,18 +828,17 @@ class DTMeasureSensitivity(DTTask):
     # Input ranges of ADS868x in volts (assumed bipolar) in the order of code
     __adcVoltRange = (12.288, 10.240, 6.1440, 5.1200, 2.5600)
 
-    def __init__(self, frequency: int = 200*MHz, modfreq: int = 10*kHz,
-                 refinl: float = 5, refatt: float = 1, refoutpower: float = 10, datanum: int = 16384):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        self.parameters['modfrequency'] = int(modfreq)
-        self.parameters['refatt'] = float(refatt)
-        self.parameters['refoutpower'] = float(refoutpower)
-        self.parameters['refinl'] = float(refinl)
-        self.parameters['datanum'] = int(datanum)
+    def __init__(self):
+        super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
+                         ('THRESHOLD POWER', 'STATUS'))
         self.buffer = None
-        self.results['THRESHOLD POWER'] = None
-        self.rng = np.random.default_rng()  # stub
+
+    def load_cal(self):
+        """ Loading calibration of output power. Called from the main process where dtParameterDesc is kept up to date.
+        """
+        global dtParameterDesc
+        for par in ('refatt', 'refoutpower'):
+            self.parameters[par] = dtParameterDesc[par]['default']
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -978,13 +984,13 @@ class DTDMRInputModel(DTDMRInput):
     """
     name = dict(ru='Вход ЦР (модель)', en='DMR Input (model)')
 
-    def __init__(self, frequency: int = 200*MHz):
-        super().__init__(frequency)
+    def __init__(self):
+        super().__init__()
         homedir = getenv('HOME')
         self.ifilename, self.qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
 
     def init_meas(self, **kwargs):
-        super(DTDMRInput, self).init_meas(**kwargs)
+        super(DTDMRInput, self).init_meas(**kwargs, autotest=True)
         if self.failed:
             return self
 
@@ -1006,9 +1012,8 @@ class DTDMRInputModel(DTDMRInput):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['BITERR'] = None
-        self.results['BITFREQDEV'] = None
-        self.results['BITPOWERDIF'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -1025,49 +1030,6 @@ class DTDMRInputModel(DTDMRInput):
         self.results['BITPOWERDIF'] = res[2]  # bit power difference, %
         self.set_success()
 
-        return self
-
-
-class DTTest(DTTask):
-    """
-    Task to test GUI
-    """
-    name = dict(ru='Тестовый режим', en='Test task')
-
-    def __init__(self, frequency: int = 200*MHz, modamp: float = 50, datanum: int = 16384):
-        super().__init__()
-        self.parameters['frequency'] = int(frequency)
-        self.parameters['modamp'] = float(modamp)
-        self.parameters['datanum'] = int(datanum)
-        self.results['CARRIER FREQUENCY'] = None
-        self.rng = np.random.default_rng()
-        self.counter = 0
-
-    def init_meas(self, **kwargs):
-        global DEBUG
-        self.failed = self.completed = False
-        self.start = self.time = 0
-        self.message = ''
-        for par in kwargs:
-            if par in self.parameters:
-                self.parameters[par] = kwargs[par]
-        if not self.check_all_parameters():
-            self.set_error('Ошибка ввода параметров' if dtg.LANG == 'ru' else 'Parameter enter error')
-        sleep(0.5)
-        if DEBUG:
-            print('Task initialized', self.parameters)
-        self.inited = True
-        return self
-
-    def measure(self):
-        global DEBUG
-        self.message = ''
-        sleep(1)
-        self.results['CARRIER FREQUENCY'] = int(self.rng.normal(self.parameters['frequency'], MHz))
-        self.set_success()
-        self.counter += 1
-        if DEBUG:
-            print(f'Measured {self.counter}:', self.results)
         return self
 
 
@@ -1162,7 +1124,7 @@ def dtTaskInit():
     dtTaskTypeDict = dict(cls=dict(), ru=dict(), en=dict())
     dtAllScenarios = dict()
     for taskClass in (DTCalibrate, DTMeasurePower, DTMeasureCarrierFrequency,
-                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity, DTDMRInputModel, DTTest):
+                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity, DTDMRInputModel):
         dtTaskTypes.append(taskClass)
         dtTaskTypeDict['cls'][taskClass.__name__] = taskClass
         dtTaskTypeDict['ru'][taskClass.name['ru']] = taskClass
