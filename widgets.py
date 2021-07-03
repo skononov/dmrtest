@@ -27,9 +27,9 @@ mpl.rcParams["axes.linewidth"] = 1.0
 mpl.rcParams["axes.xmargin"] = 0.0
 mpl.rcParams["font.size"] = 10
 mpl.rcParams["figure.constrained_layout.use"] = True
-mpl.rcParams["figure.constrained_layout.h_pad"] = 0.1
-mpl.rcParams["figure.constrained_layout.w_pad"] = 0.2
-mpl.rcParams["figure.constrained_layout.hspace"] = 0.05
+mpl.rcParams["figure.constrained_layout.h_pad"] = 0.06
+mpl.rcParams["figure.constrained_layout.w_pad"] = 0.1
+mpl.rcParams["figure.constrained_layout.hspace"] = 0.03
 mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
 
 _rootWindowWidth = 1024
@@ -286,14 +286,14 @@ class DTPlotFrame(tk.Frame):
                 if result['type'] == 'time':
                     n = result['n']
                     x = result['x']
-                    ax.plot(x[:n], result['y'][:n], '.-', color=color)
+                    ax.plot(x[:n], result['y'][:n], '.', ls=('-' if n < 100 else ''), color=color)
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Время [с]' if dtg.LANG == 'ru' else 'Time [s]')
                     yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
                     ax.set_ylabel(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
-                    ax.set_xlim(0, max(int(x[n-1]+1), 10))
+                    ax.set_xlim(x[0], max(int(x[n-1]+1), x[0]+10))
                 else:
-                    ax.plot(result['x'], result['y'], '-.', color=color)
+                    ax.plot(result['x'], result['y'], '.', ls=('-' if result['n'] < 100 else ''), color=color)
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
                     ax.set_ylabel(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
@@ -307,10 +307,12 @@ class DTPlotFrame(tk.Frame):
             for ax, key in zip(axes, ckeys):
                 result = results[key]
                 n = result['n']
-                x = result['x']
+                x = result['x'][:n] if result['x'].size > n else result['x']
+                y = result['y'][:n] if result['y'].size > n else result['y']
                 ax.lines[0].set_ls('-' if n < 100 else '')
-                ax.lines[0].set_data(x[:n], result['y'][:n])
-                ax.set_xlim(x[0], max(int(x[n-1]+1), 10))
+                ax.lines[0].set_data(x, y)
+                if result['type'] == 'time':
+                    ax.set_xlim(x[0], max(int(x[n-1]+1), x[0]+10))
                 ax.relim(True)
                 ax.autoscale_view(tight=False)
         self.figure.canvas.draw()
@@ -707,7 +709,7 @@ class DTTaskFrame(tk.Frame):
         resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
         resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
+        self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 4.2))
         self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
         self.plotimg = tk.PhotoImage(file='img/plot.gif')
@@ -802,43 +804,50 @@ class DTTaskFrame(tk.Frame):
             self.message.configure(text='Неизвестное состояние', foreground='red')
             return
 
-        for res in self.reslabels:
+        for res in self.plotvars:
             presult = self.presults[res]
+            value = lastResult.get_conv_res(res)
             if presult['type'] == 'time':
                 n = presult['n']
                 nadd = len(self.resultBuffer)
                 if n + nadd > self.resHistSize:
                     n = 0
-                presult['x'][n:n+nadd] = [rtask.time for rtask in self.resultBuffer]
-                presult['y'][n:n+nadd] = [rtask.get_conv_res(res) for rtask in self.resultBuffer]
-                presult['n'] = n + nadd
+                for rtask in self.resultBuffer:
+                    value = rtask.get_conv_res(res)
+                    if value is not None:
+                        presult['x'][n] = rtask.time
+                        presult['y'][n] = value
+                        n += 1
+                    presult['n'] = n
 
-            reslabel: tk.Label = self.reslabels[res]
-            value = lastResult.get_conv_res(res)
-            if value is not None:
-                fmt = f'%{dtResultDesc[res]["format"]}'
-                if isinstance(self.task, tasks.DTMeasureSensitivity) and res == 'THRESHOLD POWER':
-                    reslabel.configure(fg='red')
-                    if lastResult.results['STATUS'] == -1:  # actual thr. power is lower
-                        fmt = '<' + fmt
-                    elif lastResult.results['STATUS'] == 1:  # actual thr. power is higher
-                        fmt = '>' + fmt
-                    elif lastResult.results['STATUS'] == 2:  # fluctuations
-                        fmt = '~' + fmt
-                    else:
-                        reslabel.configure(fg='green')
+                # Prepare for plotting results
+                presult['draw'] = draw = self.plotvars[res].get() != 0
 
-                reslabel['text'] = fmt % value
-            else:
-                reslabel['text'] = '----'
+                # only FFT data need preparation for plotting, time data are always up-to-date
+                if draw and presult['type'] == 'freq':
+                    presult['y'] = y = lastResult.results[res]
+                    presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
+                    presult['n'] = y.size
 
-            # Prepare for plotting results
-            presult['draw'] = draw = self.plotvars[res].get() != 0
-            # only FFT data need preparation for plotting, time data are always up-to-date
-            if draw and presult['type'] == 'freq':
-                presult['y'] = y = lastResult.results[res]
-                presult['x'] = rfftfreq(y.size, 1./dtg.adcSampleFrequency)
-                presult['n'] = y.size
+            if res in self.reslabels:
+                reslabel: tk.Label = self.reslabels[res]
+                value = lastResult.get_conv_res(res)
+                if value is not None:
+                    fmt = f'%{dtResultDesc[res]["format"]}'
+                    if isinstance(self.task, tasks.DTMeasureSensitivity) and res == 'THRESHOLD POWER':
+                        reslabel.configure(fg='red')
+                        if lastResult.results['STATUS'] == -1:  # actual thr. power is lower
+                            fmt = '<' + fmt
+                        elif lastResult.results['STATUS'] == 1:  # actual thr. power is higher
+                            fmt = '>' + fmt
+                        elif lastResult.results['STATUS'] == 2:  # fluctuations
+                            fmt = '~' + fmt
+                        else:
+                            reslabel.configure(fg='green')
+
+                    reslabel['text'] = fmt % value
+                else:
+                    reslabel['text'] = '----'
 
         self.plotFrame.plotGraphs(self.presults)
 
