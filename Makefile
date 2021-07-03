@@ -4,7 +4,7 @@ LD:=gcc
 CFLAGS:=-fPIC -g -Wall
 LDFLAGS:=-fPIC
 
-SOURCES:=$(wildcard *.c)
+SOURCES:=pll.c inl.c ber.c serial.c
 DEPS:=$(SOURCES:.c=.c.d)
 EXECS:=testser testpll
 TARGETS:=${EXECS} libdmr.so

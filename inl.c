@@ -22,8 +22,8 @@
 //if peak is bad, return 0
 int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfpeak)
 {
-	static const double eps=0.000001;
-	static const double epsraw=0.01;
+	static const double eps = 0.000001;
+	static const double epsraw = 0.01;
 
 	*pfpeak = *ppwr = 0;
 
@@ -32,42 +32,33 @@ int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfp
 	for(int i=fmin; i<=fmax; i++) {
 		if(amp[i]>amp[fpeak]) fpeak = i;
 	}
-	if(fpeak==fmin || fpeak==fmax) return 0;
+	//if(fpeak==fmin || fpeak==fmax) return 0;
 	pwr = amp[fpeak]*amp[fpeak];
 	if(pwr==0) return 0;
 	
 	int bp = fpeak+1, bm = fpeak-1;
 	double pnew;
 	int out;
-	while (bp<=fmax || bm>=fmin)
+	while (bp <= fmax || bm >= fmin)
 	{
 		out=1;
-		if(bp<=fmax) {
+		if (bp <= fmax) {
 			pnew = pwr + amp[bp]*amp[bp];
-			if((pnew-pwr)/pwr > epsraw) {
+			if ((pnew-pwr)/pwr > epsraw || ((pnew-pwr)/pwr <= epsraw && ((pnew-pwr)/pwr > eps) && amp[bp] < amp[bp-1])) {
 				pwr = pnew; 
 				bp++; 
-				out=0; 
-			} else if(((pnew-pwr)/pwr>eps) && amp[bp]<amp[bp-1]) { 
-				pwr=pnew; 
-				bp++; 
-				out=0; 
+				out = 0; 
 			}
 		}
-		if(bm>=fmin) {
+		if (bm >= fmin) {
 			pnew = pwr + amp[bm]*amp[bm];
-			if((pnew-pwr)/pwr>epsraw) {
-				pwr=pnew; 
+			if((pnew-pwr)/pwr > epsraw || ((pnew-pwr)/pwr <= epsraw && ((pnew-pwr)/pwr > eps) && amp[bm] < amp[bm+1])) {
+				pwr = pnew; 
 				bm--; 
-				out=0;
-			}
-			else if(((pnew-pwr)/pwr>eps) && amp[bm]<amp[bm+1]) {
-				pwr=pnew; 
-				bm--; 
-				out=0;
+				out = 0;
 			}
 		}
-		if(out) break;
+		if (out) break;
 	}
 	
 	*pfpeak = 0;

@@ -1,4 +1,5 @@
 from ctypes import cdll, c_double, c_uint, c_int, byref
+from numpy import array
 
 _libdmr = cdll.LoadLibrary("./libdmr.so")
 
@@ -45,15 +46,19 @@ def get_inl(amp, fm):
     return c_inl.value, c_h.value
 
 
-def get_ber(iamp, qamp):
-    """ Calculate number of total and erroneously decoded symbols
+def get_ber(iamp, qamp, maxlen):
+    """ Calculate number of total and erroneously decoded symbols, symbol intervals
     """
     c_size = c_int(len(iamp))
     c_iamp = (c_int*len(iamp))(*iamp)
-    c_qamp = (c_int*len(iamp))(*qamp)
+    c_qamp = (c_int*len(qamp))(*qamp)
+    c_iref = (c_int*maxlen)(*[0]*maxlen)
+    c_qref = (c_int*maxlen)(*[0]*maxlen)
+    c_symlenref = (c_int*4)(*[0]*4)
+    c_maxlen = c_int(maxlen)
     c_numerr = c_int(0)
     c_numbit = c_int(0)
-    rc = _libdmr.bercalc(c_iamp, c_qamp, c_size, byref(c_numerr), byref(c_numbit))
+    rc = _libdmr.bercalc(c_iamp, c_qamp, c_size, byref(c_numerr), byref(c_numbit), c_iref, c_qref, c_symlenref, c_maxlen)
     if rc == c_int(0):
         return None, None
-    return c_numerr.value, c_numbit.value
+    return c_numerr.value, c_numbit.value, array(c_iref, dtype=int), array(c_qref, dtype=int), array(c_symlenref, dtype=int)
