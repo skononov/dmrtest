@@ -710,6 +710,8 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 5))
         self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
+        self.plotimg = tk.PhotoImage(file='img/plot.gif')
+
         self.reslabels = dict()  # labels with results
         self.plotvars = dict()  # states of checkboxes controlling what vars to plot
 
@@ -735,7 +737,7 @@ class DTTaskFrame(tk.Frame):
 
             self.plotvars[res] = tk.IntVar()
 
-            cb = tk.Checkbutton(resultFrame, text='Рисовать')
+            cb = tk.Checkbutton(resultFrame, image=self.plotimg)
             cb.configure(indicatoron=0, variable=self.plotvars[res],
                          padx=3, pady=3)
             cb.grid(row=irow, column=3, padx=5)
