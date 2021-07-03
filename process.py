@@ -1,5 +1,6 @@
+from time import time
 import tasks
-from tasks import DTTask
+from tasks import DTTask, DTCalibrate
 from dtcom import DTSerialCom
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -13,13 +14,30 @@ class DTProcess(Process):
     def __init__(self, conn: Connection):
         super().__init__()
         self.conn = conn
+        self.caltask = DTCalibrate()
+        self.calibPeriod = 10  # 10 min
+
+    def calibrate(self):
+        if self.DEBUG:
+            print(f'DTProcess: Calibration')
+        self.caltask.init_meas()
+        if self.caltask.failed:
+            print(self.caltask.message)
+        self.prevCalTime = time()
 
     def run(self):
         """ Run loop and waiting for submitted tasks """
-        if self.DEBUG:
-            print(f'DTProcess: Process {self.pid} started')
+        print(f'DTProcess: Process {self.pid} started')
+
+        # Calibration after the start
+        self.calibrate()
 
         while True:  # event loop
+            # periodic calibration
+            if time() - self.prevCalTime >= self.calibPeriod:
+                self.calibrate()
+            if not self.conn.poll(10):
+                continue
             obj = self.conn.recv()
             if isinstance(obj, DTTask):
                 self.__runTask(obj)
