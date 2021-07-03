@@ -1054,35 +1054,36 @@ class DTScenario:
 
         dtAllScenarios[name] = self
 
-    def addTask(self, taskType: DTTask):
+    def addTask(self, taskType: DTTask, parameters=None):
         if taskType not in dtTaskTypes:
             raise DTInternalError('DTScenario.addTask()', 'Unknown task type given')
 
         task = taskType()
         task.set_id()  # scenario is created in the main process, set task ID here
+        if isinstance(parameters, dict):
+            task.parameters = parameters
         self.tasks.append(task)
+        return task
 
     @classmethod
     def from_dict(cls, d: dict):
         """Define scenario from dict (read from configuration file)
         """
+        scen = None
         try:
-            scen = cls(d['name'])
+            scen = DTScenario(d['name'])
             for t in d['tasks']:
-                task = dtTaskTypeDict[t['class']]()
-                task.parameters = t['parameters']
-                task.set_id()  # scenario is created in the main process, set task ID here
-                scen.tasks.append(task)
+                scen.addTask(dtTaskTypeDict['cls'][t['class']], t['parameters'])
         except KeyError:
+            del scen
             raise DTInternalError('DTScenario.fromDict()', 'Wrong dict format')
         return scen
 
     def to_dict(self):
-        dtasks = list()
-        d = dict(name=self.name, tasks=dtasks)
+        d = dict(name=self.name, tasks=list())
         for task in self.tasks:
-            dtasks.append({'class': task.__class__.__name__,
-                           'parameters': task.parameters})
+            d['tasks'].append({'class': task.__class__.__name__,
+                               'parameters': task.parameters})
         return d
 
     def __getitem__(self, key):
@@ -1115,7 +1116,6 @@ class DTScenario:
     def __del__(self):
         for instance in self.tasks:
             del instance
-        del dtAllScenarios[self.name]
 
 
 def dtTaskInit():

@@ -84,6 +84,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         # init task handlers
         dtTaskInit()
 
+        DTConfiguration()
+
         # start task process
         self.taskConn, child_conn = Pipe()
         self.taskProcess = DTProcess(child_conn)
@@ -142,6 +144,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
             self.taskConn.send('terminate')
             self.taskProcess.join()
         self.taskConn.close()
+
+        DTConfiguration().save()
 
     def showMessage(self, message: str, master=None, delay=0, status='default'):
         w = tk.Toplevel(padx=20, pady=10)
@@ -379,8 +383,15 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         dialog.grab_release()
         nscenarios = len(tasks.dtAllScenarios)
         if nscenarios > 0:
-            self.runScenarioMB['state'] = tk.NORMAL
+            self.delScenarioMB['state'] = self.runScenarioMB['state'] = tk.NORMAL
             self.scenariosText.set(f'{nscenarios} сценариев определено')
+
+    def __deleteScenario(self, scenario: DTScenario):
+        del tasks.dtAllScenarios[scenario.name]
+        nscenarios = len(tasks.dtAllScenarios)
+        self.scenariosText.set(f'{nscenarios} сценариев определено')
+        if nscenarios == 0:
+            self.delScenarioMB['state'] = self.runScenarioMB['state'] = tk.DISABLED
 
     def __chooseTask(self, taskType: DTTask):
         task: DTTask = taskType()
@@ -428,22 +439,19 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
     def __createMenuFrame(self):
         self.menuFrame = tk.Frame(self, padx=10, pady=10)
 
-        for i in range(1, 5):
+        for i in range(1, 6):
             self.menuFrame.rowconfigure(i, pad=20)
-        self.menuFrame.rowconfigure(5, weight=1)
+        self.menuFrame.rowconfigure(6, weight=1)
 
         self.scenariosText = tk.StringVar()
-        self.scenariosText.set(f'{len(tasks.dtAllScenarios)} сценариев определено')
         self.scenariosText.set(f'{len(tasks.dtAllScenarios)} сценариев определено')
         tk.Label(self.menuFrame, textvariable=self.scenariosText).grid(row=0)
 
         csmb = self.runScenarioMB = tk.Menubutton(self.menuFrame, text='Запустить сценарий')
         csmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
-        if len(tasks.dtAllScenarios) == 0:
-            csmb['state'] = tk.DISABLED
-        csmb.grid(row=1, sticky=tk.W+tk.E)
         csmb['menu'] = csmb.menu = DTChooseObjectMenu(csmb, command=self.__runScenario,
                                                       objects=tasks.dtAllScenarios)
+        csmb.grid(row=1, sticky=tk.W+tk.E)
 
         cmmb = tk.Menubutton(self.menuFrame, text='Выбрать измерение')
         cmmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
@@ -456,13 +464,23 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         csb.grid(row=3, sticky=tk.W+tk.E)
         csb.focus()
 
+        cdsb = self.delScenarioMB = tk.Menubutton(self.menuFrame, text='Удалить сценарий')
+        cdsb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
+        cdsb['menu'] = cdsb.menu = DTChooseObjectMenu(cdsb, command=self.__deleteScenario,
+                                                      objects=tasks.dtAllScenarios)
+        cdsb.grid(row=4, sticky=tk.W+tk.E)
+
         self.debugVar = tk.IntVar()
         cdb = tk.Checkbutton(self.menuFrame, text='Отладка')
         cdb.configure(variable=self.debugVar, padx=3, command=self.__setDebug)
-        cdb.grid(row=4, sticky=tk.W)
+        cdb.grid(row=5, sticky=tk.W)
 
-        quitb = tk.Button(self.menuFrame, text='Выход', command=self.master.quit, height=2)
-        quitb.grid(row=5, sticky=tk.W+tk.E+tk.S)
+        quitb = tk.Button(self.menuFrame, text='Выход', command=self.quit, height=2)
+        quitb.grid(row=6, sticky=tk.W+tk.E+tk.S)
+
+        if len(tasks.dtAllScenarios) == 0:
+            cdsb['state'] = tk.DISABLED
+            csmb['state'] = tk.DISABLED
 
 
 class DTNewScenarioDialog(tk.Toplevel):

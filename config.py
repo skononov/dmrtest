@@ -1,94 +1,74 @@
 import json
-from dtexcept import DTError
+from tasks import DTScenario
+import tasks
+import dtglobals as dtg
+from os import getenv
+from singleton import Singleton
+from traceback import print_exc
 
 __appname__ = 'DMR TEST'
 __version__ = '0.1'
 
 
-class DTConfiguration:
+class DTConfiguration(metaclass=Singleton):
     """
     Configuration manager for the DMR TESTER GUI.
 
-    Scenario is a dict of tasks with a task name being a key and dict of parameters being a value. Task parameters are
-    stored as dictionaries with one obligatory element 'value' and two optional elements: 'minValue', 'maxValue'.
+    Scenario is a list of tasks with parameters.
     """
-    __dtrcFilename = '~/.dtconf.json'
+    __dtrcFilename = getenv('HOME') + '/dmr/config.json'
 
     def __init__(self, filename=None):
-        self.config = dict(scenarios={})
-        if filename is not None:
-            self.load(filename)
-        else:
-            self.load(DTConfiguration.__dtrcFilename)
+        self.config = dict()
+        self.load(filename)
 
-    def load(self, filename):
+    def load(self, filename=None):
+        if filename is None and self.__dtrcFilename is not None:
+            filename = self.__dtrcFilename
+
         try:
-            with open(filename, 'r') as file:
+            with open(filename, 'r', encoding='utf-8') as file:
                 self.config = json.load(file)
-            print(f'Configuration loaded from {filename}')
-        except Exception as exc:
-            print(exc)
-            print(f'DTConfiguration.load(): {filename}: could not open file for reading. Use default configuration.')
 
-    def save(self, filename):
+        except Exception:
+            print('DTConfiguration.load():', f'Could not read configuration from {filename}')
+            print_exc()
+            self.config = dict()
+            return False
+
+        nscenarios = 0
+        if 'scenarios' in self.config and isinstance(self.scenarios, list):
+            for scendict in self.scenarios:
+                try:
+                    DTScenario.from_dict(scendict)
+                except Exception:
+                    print_exc()
+                else:
+                    nscenarios += 1
+
+        if 'language' in self.config and self.config['language'] in ('ru', 'en'):
+            dtg.LANG = self.config['language']
+        elif getenv('LANG')[:2] == 'ru':
+            dtg.LANG = 'ru'
+        else:
+            dtg.LANG = 'en'
+        print(f'Configuration loaded from {filename} with {nscenarios} scenarios')
+
+        return True
+
+    def save(self, filename=None):
         try:
-            with open(filename, 'w') as file:
-                json.dump(self.config, file)
-            print(f'Configuration saved to {filename}')
-        except Exception as exc:
-            raise DTError('DTConfiguration.save()', f'{filename}: could not open file for writing') from exc
+            if filename is None and self.__dtrcFilename is not None:
+                filename = self.__dtrcFilename
+            self.config['scenarios'] = [scenario.to_dict() for scenario in tasks.dtAllScenarios.values()]
+            self.config['language'] = dtg.LANG
+            with open(filename, 'w', encoding='utf-8') as file:
+                json.dump(self.config, file, indent=2)
+            print(f'Configuration saved to {filename} with {len(self.scenarios)} scenarios')
+        except Exception:
+            print('DTConfiguration.save():', f'{filename}: could not open file for writing')
+            print_exc()
 
     @property
     def scenarios(self):
         return self.config['scenarios']
-
-    def scenario(self, name):
-        try:
-            return self.config['scenarios'][name]
-        except KeyError as exc:
-            raise DTError('DTConfiguration.scenario()', f'Scenario "{name}" is not defined') from exc
-
-    def add_task(self, scenario, task, params=None):
-        if params is None:
-            params = dict()
-        if scenario not in self.config['scenarios']:
-            self.config['scenarios'][scenario] = {task: params}
-        elif task in self.config['scenarios'][scenario]:
-            print(f'DTConfiguration.add_task(): Task {task} is already defined for scenario {scenario}')
-        else:
-            self.config['scenarios'][scenario][task] = params
-
-    def del_scenario(self, name):
-        try:
-            del self.config['scenarios'][name]
-        except KeyError:
-            print('DTConfiguration.del_scenario(): No scenario "{name}" defined.')
-
-    def del_task(self, scenario, task):
-        try:
-            sctasks = self.config['scenarios'][scenario]
-        except KeyError:
-            raise DTError('DTConfiguration.del_task()', f'No scenario {scenario} defined.')
-        else:
-            for i, t in enumerate(sctasks):
-                if task == t['task']:
-                    sctasks.pop(i)
-                    break
-
-    def clear_scenarios(self):
-        self.config['scenarios'] = {}
-
-    def set_parameter(self, scenario, task, param, value, minval=None, maxval=None):
-        scenarios = self.config['scenarios']
-        if scenario in scenarios:
-            if task not in scenarios[scenario]:
-                scenarios[scenario][task] = dict()
-            else:
-
-                self.config['parameters'][task][param] = dict(value=value, minValue=minval, maxValue=maxval)
-
-    def del_parameter(self, task, param):
-        try:
-            del self.config['parameters'][task][param]
-        except KeyError:
-            raise DTError('DTConfiguration.del_parameter()', f'No task "{task}" or parameter "{param}" defined.')
