@@ -1,7 +1,6 @@
 from numbers import Integral
 from os import access, R_OK, getpid, getenv
 from io import FileIO
-from tkinter.constants import SUNKEN
 import numpy as np
 from scipy.fft import rfftfreq
 import matplotlib as mpl
@@ -673,7 +672,7 @@ class DTTaskFrame(tk.Frame):
 
             name = dtResultDesc[res][dtg.LANG]
             unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
-            
+
             tk.Label(paramFrame, text=name+':').grid(row=irow, column=0, sticky=tk.E)
 
             parvar = tk.StringVar()
@@ -717,7 +716,7 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame = DTPlotFrame(self.leftFrame, figsize=(6, 4.2))
         self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
-        self.plotimg = tk.PhotoImage(file=self.imgdir + '/plot.gif')
+        self.plotimg = tk.PhotoImage(file=DTApplication().imgdir + '/plot.gif')
 
         self.reslabels = dict()  # labels with results
         self.plotvars = dict()  # states of checkboxes controlling what vars to plot
@@ -878,7 +877,8 @@ class DTTaskFrame(tk.Frame):
     def __check_process(self):
         if not self.taskProcess.is_alive():  # unexpected stop of DTProcess
             DTApplication().showMessage('Ошибка приложения. Требуется перезапуск.\n' +
-                                        self.__class__.__name__ + 'DTProcess is dead, that must not happen while application is running.',
+                                        self.__class__.__name__ +
+                                        'DTProcess is dead, that must not happen while application is running.',
                                         status='error')
             DTApplication().quit()
             return
