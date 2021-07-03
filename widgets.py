@@ -29,7 +29,7 @@ mpl.rcParams["font.size"] = 10
 mpl.rcParams["figure.constrained_layout.use"] = True
 mpl.rcParams["figure.constrained_layout.h_pad"] = 0.06
 mpl.rcParams["figure.constrained_layout.w_pad"] = 0.1
-mpl.rcParams["figure.constrained_layout.hspace"] = 0.03
+mpl.rcParams["figure.constrained_layout.hspace"] = 0.02
 mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
 
 _rootWindowWidth = 1024
@@ -290,13 +290,13 @@ class DTPlotFrame(tk.Frame):
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Время [с]' if dtg.LANG == 'ru' else 'Time [s]')
                     yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
-                    ax.set_ylabel(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
+                    ax.set_title(f'{dtResultDesc[key][dtg.LANG]} [{yunit}]')
                     ax.set_xlim(x[0], max(int(x[n-1]+1), x[0]+10))
                 else:
                     ax.plot(result['x'], result['y'], '.', ls=('-' if result['n'] < 100 else ''), color=color)
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         ax.set_xlabel('Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]')
-                    ax.set_ylabel(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
+                    ax.set_title(f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}')
                 ax.relim(True)
                 ax.autoscale_view(tight=False)
                 ax.grid(self.gridOn, 'major')
@@ -554,7 +554,7 @@ class DTNewScenarioDialog(tk.Toplevel):
 class DTTaskFrame(tk.Frame):
     """ A frame rendered in the root window to manage task execution
     """
-    def __init__(self, master=None, task=tasks.DTTest(), state=None):
+    def __init__(self, master=None, task=None, state=None):
         """ Constructor for a task front-end.
             task - DTTask object to be managed
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
@@ -820,14 +820,14 @@ class DTTaskFrame(tk.Frame):
                         n += 1
                     presult['n'] = n
 
-                # Prepare for plotting results
-                presult['draw'] = draw = self.plotvars[res].get() != 0
+            # Prepare for plotting results
+            presult['draw'] = draw = self.plotvars[res].get() != 0
 
-                # only FFT data need preparation for plotting, time data are always up-to-date
-                if draw and presult['type'] == 'freq':
-                    presult['y'] = y = lastResult.results[res]
-                    presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
-                    presult['n'] = y.size
+            # only FFT data need preparation for plotting, time data are always up-to-date
+            if draw and presult['type'] == 'freq':
+                presult['y'] = y = lastResult.results[res]
+                presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
+                presult['n'] = y.size
 
             if res in self.reslabels:
                 reslabel: tk.Label = self.reslabels[res]
