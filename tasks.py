@@ -7,7 +7,7 @@ from time import sleep
 
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
-from dt_c_api import get_peak, get_inl
+from dt_c_api import get_peak, get_inl, get_ber
 from dtglobals import Hz, kHz, MHz, adcSampleFrequency, symbolDevFrequency
 import dtglobals as dtg  # for dtg.LANG
 
@@ -552,7 +552,7 @@ class DTDMRInput(DTTask):
     def __init__(self, frequency: int = 200*MHz, bitnum: int = 1000):
         super().__init__()
         self.parameters['frequency'] = int(frequency)
-        self.parameters['bitnum'] = int(bitnum)
+        # self.parameters['bitnum'] = int(bitnum)
 
         # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
         self.bufsize = 255*2*25*2
@@ -590,26 +590,25 @@ class DTDMRInput(DTTask):
         if self.failed:
             return self
 
-        bitnum = int(self.parameters['bitnum'])
+        # bitnum = int(self.parameters['bitnum'])
 
         try:
             # read out the number of error dibits
-            nerrbits = self.com.command('GET BITERR', bitnum, nreply=1)[0]
+            # nerrbits = self.com.command('GET BITERR', bitnum, nreply=1)[0]
             # read out the ADC data for dibit sequence
             self.buffer = self.com.command('GET DMRDIBIT', nreply=self.bufsize)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
 
-        self.results['BITERR'] = 100. * nerrbits/bitnum  # percent of bit errors
-
         res = self.__dmr_analysis()
         if res is None:
             self.set_eval_error()
             return self
 
-        self.results['BITFREQDEV'] = res[0]
-        self.results['BITPOWERDIF'] = res[1]
+        self.results['BITERR'] = res[0]  # bit errors, %
+        self.results['BITFREQDEV'] = res[1]  # bit frequency deviation, Hz
+        self.results['BITPOWERDIF'] = res[2]  # bit power difference, %
         self.set_success()
 
         return self
@@ -674,6 +673,7 @@ class DTDMRInput(DTTask):
             Extract maximum frequency deviation of a symbol and power difference between symbols.
         """
         if self.buffer is None or len(self.buffer) != self.bufsize:
+            self.set_eval_error(f'Data length ({len(self.buffer)}) differs from expected ({self.bufsize})')
             return None
 
         # preparing data for Blackman window application
@@ -686,6 +686,18 @@ class DTDMRInput(DTTask):
         # subtract the DC component
         It -= np.around(np.mean(It)).astype('int32')
         Qt -= np.around(np.mean(Qt)).astype('int32')
+
+        # find the bit error rate
+        numerr, numbit = get_ber(It, Qt)
+
+        if numerr is None or numbit is None:
+            self.set_eval_error(f'Too small data length - {len(self.buffer)}')
+            return None
+
+        ber = 100.*numerr/numbit
+
+        if debug:
+            print(f'Total symbols: {numbit}, error symbols: {numerr}, BER: {ber:.1f}%')
 
         # determine the best central points for analysing each of 4 symbols
         bestpos = self.__get_best_symbol_points(It, Qt)
@@ -721,9 +733,9 @@ class DTDMRInput(DTTask):
         ampdiff = 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
 
         if debug:
-            return maxfdev, ampdiff, bestpos, If, Qf
+            return ber, maxfdev, ampdiff, bestpos, If, Qf
         else:
-            return maxfdev, ampdiff
+            return ber, maxfdev, ampdiff
 
 
 class DTDMROutput(DTTask):
@@ -931,6 +943,7 @@ class DTTest(DTTask):
         self.counter = 0
 
     def init_meas(self, **kwargs):
+        global DEBUG
         self.failed = self.completed = False
         self.start = self.time = 0
         self.message = ''
@@ -940,16 +953,19 @@ class DTTest(DTTask):
         if not self.check_all_parameters():
             self.set_error('Ошибка ввода параметров' if dtg.LANG == 'ru' else 'Parameter enter error')
         sleep(0.5)
-        print('Task initialized', self.parameters)
+        if DEBUG:
+            print('Task initialized', self.parameters)
         self.inited = True
         return self
 
     def measure(self):
+        global DEBUG
         sleep(1)
         self.results['CARRIER FREQUENCY'] = int(self.rng.normal(self.parameters['frequency'], MHz))
         self.set_success()
         self.counter += 1
-        print(f'Measured {self.counter}:', self.results)
+        if DEBUG:
+            print(f'Measured {self.counter}:', self.results)
         return self
 
 
