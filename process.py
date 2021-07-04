@@ -4,6 +4,7 @@ from tasks import DTTask, DTCalibrate
 from dtcom import DTSerialCom
 from multiprocessing import Process
 from multiprocessing.connection import Connection
+from io import FileIO
 
 
 class DTProcess(Process):
@@ -15,11 +16,12 @@ class DTProcess(Process):
         super().__init__()
         self.conn = conn
         self.caltask = DTCalibrate()
-        self.calibPeriod = 10  # 10 min
+        self.calibPeriod = 600  # 10 min
 
     def calibrate(self):
         if self.DEBUG:
             print(f'DTProcess: Calibration')
+
         self.caltask.init_meas()
         if self.caltask.failed:
             print(self.caltask.message)
@@ -80,6 +82,7 @@ class DTProcess(Process):
                     msg = self.conn.recv()
 
         self.conn.send(f'stopped {task.id}')
+        FileIO(self.conn.fileno(), 'r', closefd=False).flush()  # flush input messages
         if self.DEBUG:
             print(f'DTProcess: Task "{task.name["en"]}" finished')
 
