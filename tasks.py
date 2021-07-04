@@ -21,23 +21,23 @@ DEBUG = False
 dtParameterDesc = {
     'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real, 'default': 31.5,
             'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB', 'format': '4.1f'},
-    'avenum': {'ru': 'N точек усреднения', 'en': 'Averaging points', 'type': Integral, 'default': 64,
+    'avenum': {'ru': 'N точек уср.', 'en': 'N av. pnts', 'type': Integral, 'default': 64,
                'lowlim': 1, 'uplim': 4096, 'increment': 1, 'dunit': '1', 'format': '4.0f'},
-    'datanum': {'ru': 'N точек АЦП', 'en': 'ADC points', 'type': Integral, 'default': 16384,
+    'datanum': {'ru': 'N точек АЦП', 'en': 'N ADC pnts', 'type': Integral, 'default': 16384,
                 'lowlim': 4, 'uplim': 16384, 'increment': 2, 'dunit': '1', 'format': '5.0f'},
-    'frequency': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'type': Integral, 'default': 200*MHz,
+    'frequency': {'ru': 'Несущая част.', 'en': 'Carrier freq.', 'type': Integral, 'default': 200*MHz,
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота модуляции', 'en': 'Modulating frequency', 'type': Integral, 'default': 10*MHz,
+    'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': 10*MHz,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
-    'modamp': {'ru': 'Амплитуда модуляции', 'en': 'Modulating amplitude', 'type': Real, 'default': 50,
+    'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 50,
                'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
     # 'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
     #            'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
-    'refinl': {'ru': 'Порог КНИ', 'en': 'Threshold INL', 'type': Real, 'default': 5,
+    'refinl': {'ru': 'Порог КНИ', 'en': 'Thr. INL', 'type': Real, 'default': 5,
                'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'},
-    'refatt': {'ru': 'Опорное ослабление', 'en': 'Reference attenuation', 'type': Real, 'default': 31.5,
+    'refatt': {'ru': 'Опор. осл.', 'en': 'Ref. att.', 'type': Real, 'default': 31.5,
                'dunit': 'dB', 'format': '4.1f', 'readonly': True},
-    'refoutpower': {'ru': 'Опорная вых. мощность', 'en': 'Ref. output power', 'type': Real, 'default': 1,
+    'refoutpower': {'ru': 'Опор. мощн.', 'en': 'Ref. power', 'type': Real, 'default': 1,
                     'dunit': 'dBm', 'format': '5.1f', 'readonly': True},
     # result target values and tolerances by default
     'CARRIER FREQUENCY': {'target_value': 'frequency', 'abs_tolerance': kHz, 'rel_tolerance': 1e-4},
@@ -277,7 +277,8 @@ class DTTask:
         self.message = ('Ошибка связи с устройством:\n' if dtg.LANG == 'ru' else 'Communication error:\n') + strexc
         if 'MCU BUSY' in strexc:
             self.message += '\nПерезагрузите устройство.'
-        del self.com  # delete failed instance to try opening port next time
+        if hasattr(self, 'com'):
+            del self.com  # delete failed instance to try opening port next time
 
     def set_status_error(self, status: int):
         self.failed = True
