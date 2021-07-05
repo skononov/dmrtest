@@ -696,10 +696,11 @@ class DTTaskFrame(tk.Frame):
 
     def __createWidgets(self):
         self.configure(padx=5, pady=5)
-        self.lw = int(0.6*_rootWindowWidth)
-        self.rw = _rootWindowWidth-self.lw
+        availWidth = _rootWindowWidth-2*self.cget('padx')
+        self.lw = int(0.6*availWidth)
+        self.rw = availWidth-self.lw
         self.rowconfigure(1, weight=1)
-        self.columnconfigure(0, weight=6)
+        self.columnconfigure(0, minsize=self.lw)
         self.columnconfigure(1, weight=4)
 
         tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE,
@@ -871,7 +872,7 @@ class DTTaskFrame(tk.Frame):
         statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
         statusFrame.grid(row=2, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        self.message = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-30)
+        self.message = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-80)
         self.message.grid(sticky=tk.W+tk.E)
         self.progress = -1
 
