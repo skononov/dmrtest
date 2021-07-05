@@ -15,10 +15,9 @@ if __name__ == "__main__":
     t = linspace(0, It.size/adcSampleFrequency, It.size, endpoint=False)
 
     tasks.DEBUG = True
-    dmrtask = tasks.DTDMRInput()
-    fftlen = dmrtask.fftlen
+    dmrtask = tasks.DTDMRInputModel()
 
-    res = dmrtask.dmr_test_analysis(It, Qt)
+    res = dmrtask.dmr_analysis(It, Qt)
     if res is None:
         print('Failed DMR analysis')
         exit(1)
@@ -48,13 +47,13 @@ if __name__ == "__main__":
 
     plt.tight_layout()
 
-    f = rfftfreq(fftlen, 1/adcSampleFrequency)
-
     _, ax = plt.subplots(3, 4, sharex=True, figsize=(12, 9))
     for i in range(4):
         If = res[4][i]
         Qf = res[5][i]
         Af = res[6][i]
+        fftlen = symintervals[i][1]-symintervals[i][0]
+        f = rfftfreq(fftlen, 1/adcSampleFrequency)
         ax[0][i].plot(f[:10], If[:10], '-o')
         ax[0][i].set_title(f'I FFT, dibit {dibits[i]}')
         ax[0][i].set_ylabel('Amplitude')

@@ -846,7 +846,7 @@ class DTTaskFrame(tk.Frame):
                 reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
                 tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
-            elif res == 'IFFT' or res == 'QFFT':
+            elif res == 'FFT':
                 name = res
             else:
                 continue
@@ -998,7 +998,7 @@ class DTTaskFrame(tk.Frame):
             if res in self.presults:
                 self.presults[res]['n'] = 0
             else:
-                if res[-3:] != 'FFT':  # init time data storage
+                if res != 'FFT':  # init time data storage
                     self.presults[res] = dict(draw=False,
                                               type='time',
                                               n=0,  # number of points

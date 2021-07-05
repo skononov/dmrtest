@@ -333,6 +333,10 @@ class DTMeasurePower(DTTask):
     """
     name = dict(ru='Измерение входной/выходной мощности', en='Measuring input&output power')
 
+    adcCountToPower = 3/34  # [dBm/ADC_LSB]
+    minPowerRange = -70  # dBm
+    # Power[dBm] = ADC_counts*adcCountToPower + minPowerRange
+
     def __init__(self):
         super().__init__(('avenum', 'att'), ('OUTPOWER', 'INPOWER'))
 
@@ -352,6 +356,9 @@ class DTMeasurePower(DTTask):
         self.inited = True
         return self
 
+    def __evalPower(self, counts):
+        return [c * self.adcCountToPower + self.minPowerRange for c in counts]
+
     def measure(self):
         self.completed = False
         self.message = ''
@@ -361,11 +368,12 @@ class DTMeasurePower(DTTask):
             return self
 
         try:
-            pwrs = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
+            counts = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
 
+        pwrs = self.__evalPower(counts)
         self.results['OUTPOWER'] = pwrs[0]
         self.results['INPOWER'] = pwrs[1]
 
@@ -382,7 +390,7 @@ class DTMeasureCarrierFrequency(DTTask):
     name = dict(ru='Измерение несущей', en='Measuring carrier')
 
     def __init__(self):
-        super().__init__(('frequency', 'datanum'), ('CARRIER FREQUENCY', 'IFFT'))
+        super().__init__(('frequency', 'datanum'), ('CARRIER FREQUENCY', 'FFT'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -453,7 +461,7 @@ class DTMeasureCarrierFrequency(DTTask):
         It0 = self.buffer0.astype('float64')
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
-        a0 = self.results['IFFT'] = 2/N*np.abs(rfft(bwin*It0))
+        a0 = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It0))
 
         # convert data to float64 and subtract DC component
         It = self.buffer.astype('float64')
@@ -493,7 +501,7 @@ class DTMeasureNonlinearity(DTTask):
 
     def __init__(self):
         super().__init__(('frequency', 'modamp', 'modfrequency', 'datanum'),
-                         ('INL', 'MODINDEX', 'IFFT', 'QFFT'))
+                         ('INL', 'MODINDEX', 'FFT'))
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -529,8 +537,8 @@ class DTMeasureNonlinearity(DTTask):
 
         try:
             # reading ADC data
-            bsize = int(self.parameters['datanum'])
-            self.buffer = self.com.command('GET ADC DAT', [2, bsize], nreply=2*bsize)
+            datanum = int(self.parameters['datanum'])
+            self.buffer = self.com.command('GET ADC DAT', [2, 2*datanum], nreply=2*datanum)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -566,8 +574,9 @@ class DTMeasureNonlinearity(DTTask):
         Qt = self.buffer[N:].astype('float64')  # take second half of the buffer as the Q input
         Qt -= np.mean(Qt)
         # Compute FFT (non-negative frequencies only)
-        If = self.results['IFFT'] = 2/N*np.abs(rfft(bwin*It))
-        Qf = self.results['QFFT'] = 2/N*np.abs(rfft(bwin*Qt))
+        If = 2/N*np.abs(rfft(bwin*It))
+        Qf = 2/N*np.abs(rfft(bwin*Qt))
+        self.results['FFT'] = np.sqrt(If**2 + Qf**2)
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
         inl, mi = get_inl(np.sqrt(If**2+Qf**2), fm)
@@ -586,13 +595,10 @@ class DTDMRInput(DTTask):
     refFreq = np.array([symbolDevFrequency, 3*symbolDevFrequency]*2)
 
     def __init__(self):
-        super().__init__(('frequency',), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
+        super().__init__(('frequency',), ('BITERR',))
 
         # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
         self.bufsize = 255*2*25*2
-
-        # length of array for FFT analysis
-        # self.fftlen = 128
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -624,7 +630,7 @@ class DTDMRInput(DTTask):
         # bitnum = int(self.parameters['bitnum'])
 
         try:
-            # read out the number of error dibits
+            # read out the number of error bits
             # nerrbits = self.com.command('GET BITERR', bitnum, nreply=1)[0]
             # read out the ADC data for dibit sequence
             self.buffer = self.com.command('GET DMRDIBIT', nreply=self.bufsize)
@@ -638,62 +644,10 @@ class DTDMRInput(DTTask):
             return self
 
         self.results['BITERR'] = res[0]  # bit errors, %
-        self.results['BITFREQDEV'] = res[1]  # bit frequency deviation, Hz
-        self.results['BITPOWERDIF'] = res[2]  # bit power difference, %
+
         self.set_success()
 
         return self
-
-    def __update_best_point(self, amp, cpos: int, bestamp, bestpos):
-        pwr = np.zeros(4)
-        jl = -1
-
-        pwr = [(amp[5]-amp[0])**2 + (amp[4]+amp[1])**2,  # +1 dibit=00
-               (amp[7]-amp[2])**2 + (amp[6]+amp[3])**2,  # +3 dibit=01
-               (amp[5]+amp[0])**2 + (amp[4]-amp[1])**2,  # -1 dibit=10
-               (amp[7]+amp[2])**2 + (amp[6]-amp[3])**2]  # -3 dibit=11
-
-        if pwr[0] > pwr[1] and pwr[0] > pwr[2] and pwr[0] > pwr[3]:
-            jl = 0
-        elif pwr[1] > pwr[2] and pwr[1] > pwr[3]:
-            jl = 1
-        elif pwr[2] > pwr[3]:
-            jl = 2
-        else:
-            jl = 3
-
-        g = pwr[jl]/(sum(pwr)-pwr[jl]+0.000001)
-
-        if g > bestamp[jl]:
-            bestamp[jl] = g
-            bestpos[jl] = cpos + self.fftlen//2
-
-        return bestamp, bestpos
-
-    def __get_best_symbol_points(self, It, Qt):
-        w = 2*np.pi*symbolDevFrequency/adcSampleFrequency
-        ww = np.array([w, w, 3*w, 3*w]*2)
-        phases = np.array([0, np.pi/2]*4)
-        num = len(It)
-
-        bestamp = np.zeros(4, dtype='float32')  # 0,2 - 648 Hz, 1,3 - 1944 Hz
-        bestpos = np.empty(4, dtype='int32')
-
-        amp = np.zeros(8, dtype='float32')
-
-        for i in range(self.fftlen):
-            amp += np.array([It[i]]*4+[Qt[i]]*4)*np.sin(ww*i+phases)
-            self.__update_best_point(amp, 0, bestamp, bestpos)
-
-        for i in range(num-self.fftlen):
-            amp += np.array([It[(i+self.fftlen)]]*4 + [Qt[(i+self.fftlen)]]*4) * np.sin(ww*(i+self.fftlen)+phases) -\
-                   np.array([It[i]]*4 + [Qt[i]]*4) * np.sin(ww*i+phases)
-            self.__update_best_point(amp, i, bestamp, bestpos)
-
-        # in-place clipping bestpos with minimum and maximum values
-        np.clip(bestpos, self.fftlen//2+1, num-self.fftlen//2-1, bestpos)
-
-        return bestpos
 
     # run analysis on generated data
     def dmr_test_analysis(self, It, Qt):
@@ -703,7 +657,6 @@ class DTDMRInput(DTTask):
     def __dmr_analysis(self, debug=False):
         """ Do analysis of a random symbol sequence sent by the device.
             Calculate BER.
-            Extract maximum frequency deviation of a symbol and power difference between symbols.
         """
         if self.buffer is None or len(self.buffer) != self.bufsize:
             self.set_eval_error(f'Data length ({len(self.buffer)}) differs from expected ({self.bufsize})')
@@ -726,66 +679,7 @@ class DTDMRInput(DTTask):
 
         ber = 100.*numerr/numbit
 
-        if debug:
-            print(f'Total bits: {numbit}, error bits: {numerr}, BER: {ber:.1f}%')
-
-        # determine the best central points for analysing each of 4 symbols
-        #bestpos = self.__get_best_symbol_points(It, Qt)
-
-        #if debug:
-        #    print('Best symbol points:', bestpos)
-
-        pwr = np.zeros(4, float)
-        fpeak = np.zeros(4, float)
-
-        If = [None]*4
-        Qf = [None]*4
-        Af = [None]*4
-        istart = iend = 0
-        symintervals = []  # for testing
-
-        for i in range(4):
-            #Itr = It[bestpos[i]-self.fftlen//2:bestpos[i]+self.fftlen//2]
-            #Qtr = Qt[bestpos[i]-self.fftlen//2:bestpos[i]+self.fftlen//2]
-
-            #If[i] = 2/self.fftlen*np.abs(rfft(bwin*Itr))
-            #Qf[i] = 2/self.fftlen*np.abs(rfft(bwin*Qtr))
-
-            iend += symlenref[i]
-            symintervals.append((istart, iend))
-            # preparing Blackman window
-            bwin = blackman(symlenref[i])
-            bwin /= np.sqrt(sum(bwin**2)/symlenref[i])
-            iref, qref = Iref[istart:iend], Qref[istart:iend]
-            If[i] = 2/symlenref[i]*np.abs(rfft(iref))
-            Qf[i] = 2/symlenref[i]*np.abs(rfft(qref))
-            istart = iend
-
-            Af[i] = np.sqrt(If[i]**2 + Qf[i]**2)
-            #fmin = int(self.refFreq[i]/adcSampleFrequency*self.fftlen*0.9)
-            #fmax = int(self.refFreq[i]/adcSampleFrequency*self.fftlen*1.1)
-            fmin = 0
-            fmax = 5
-            pwr[i], fpeak[i] = get_peak(Af[i], fmin, fmax)
-            fpeak[i] *= adcSampleFrequency/symlenref[i]  # convert to Hz
-
-        fdev = np.abs(fpeak-self.refFreq)
-        ampf = np.sqrt(pwr)
-        min_ampf, max_ampf = min(ampf), max(ampf)
-
-        maxfdev = np.max(fdev)
-        ampdiff = 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
-
-        if debug:
-            print('Symbol intervals and lengths:', symintervals, symlenref)
-            print('Frequency peaks [Hz]:', fpeak)
-            print('Frequency deviations [Hz]:', fdev)
-            print('Amplitude of symbols:', ampf)
-            print(f'Max frequency deviation: {maxfdev:.1f} Hz')
-            print(f'Max difference in symbol amplitudes: {ampdiff:.1f}%')
-            return ber, maxfdev, ampdiff, symintervals, If, Qf, Af
-        else:
-            return ber, maxfdev, ampdiff
+        return ber
 
 
 class DTDMROutput(DTTask):
@@ -971,7 +865,7 @@ class DTMeasureSensitivity(DTTask):
         It -= np.mean(It)
 
         # Compute FFT (non-negative frequencies only)
-        af = self.results['IFFT'] = 2/N*np.abs(rfft(bwin*It))
+        af = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It))
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
         inl, mi = get_inl(af, fm)
@@ -979,19 +873,22 @@ class DTMeasureSensitivity(DTTask):
         return 100*inl
 
 
-class DTDMRInputModel(DTDMRInput):
+class DTDMRInputModel(DTTask):
     """
     DMR input analysis with simulated data
     """
     name = dict(ru='Вход ЦР (модель)', en='DMR Input (model)')
 
+    refFreq = DTDMRInput.refFreq
+
     def __init__(self):
-        super().__init__()
+        super().__init__(('frequency',), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
         homedir = getenv('HOME')
         self.ifilename, self.qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
+        self.bufsize = 255*2*25*2
 
     def init_meas(self, **kwargs):
-        super(DTDMRInput, self).init_meas(**kwargs, autotest=True)
+        super().init_meas(**kwargs, autotest=True)
         if self.failed:
             return self
 
@@ -1021,8 +918,9 @@ class DTDMRInputModel(DTDMRInput):
         offset = self.rng.integers(0, self.ibuffer.size-self.bufsize//2)
         It = self.ibuffer[offset:offset+self.bufsize//2]
         Qt = self.qbuffer[offset:offset+self.bufsize//2]
+        self.buffer = np.append(It, Qt)
 
-        res = self.dmr_test_analysis(It, Qt)
+        res = self.dmr_analysis()
         if res is None:
             return self
 
@@ -1032,6 +930,78 @@ class DTDMRInputModel(DTDMRInput):
         self.set_success()
 
         return self
+
+    def dmr_analysis(self, It=None, Qt=None):
+        """ Do analysis of a random symbol sequence sent by the device.
+            Calculate BER.
+            Extract maximum frequency deviation of a symbol and power difference between symbols.
+        """
+        global DEBUG
+
+        if It is None or Qt is None:
+            if self.buffer is None or len(self.buffer) != self.bufsize:
+                self.set_eval_error(f'Data length ({len(self.buffer)}) differs from expected ({self.bufsize})')
+                return None
+            It = self.buffer[:self.bufsize//2]
+            Qt = self.buffer[self.bufsize//2:]
+
+        # subtract the DC component for real data
+        It = np.around(It-np.mean(It)).astype('int32')
+        Qt = np.around(Qt-np.mean(Qt)).astype('int32')
+
+        # find the bit error rate and constant symbol intervals
+        maxlen = 20*200  # max length of returned Iref, Qref
+        numerr, numbit, Iref, Qref, symlenref = get_ber(It, Qt, maxlen)
+
+        if numerr is None or numbit is None:
+            self.set_eval_error(f'Too small data length - {len(self.buffer)}')
+            return None
+
+        ber = 100.*numerr/numbit
+
+        if DEBUG:
+            print(f'Total bits: {numbit}, error bits: {numerr}, BER: {ber:.1f}%')
+
+        pwr = np.zeros(4, float)
+        fpeak = np.zeros(4, float)
+
+        If = [None]*4
+        Qf = [None]*4
+        Af = [None]*4
+        istart = iend = 0
+        symintervals = []  # for testing
+
+        for i in range(4):
+            iend += symlenref[i]
+            symintervals.append((istart, iend))
+            # preparing Blackman window
+            bwin = blackman(symlenref[i])
+            bwin /= np.sqrt(sum(bwin**2)/symlenref[i])
+            iref, qref = Iref[istart:iend], Qref[istart:iend]
+            If[i] = 2/symlenref[i]*np.abs(rfft(iref))
+            Qf[i] = 2/symlenref[i]*np.abs(rfft(qref))
+            istart = iend
+
+            Af[i] = np.sqrt(If[i]**2 + Qf[i]**2)
+            fmin, fmax = 0, 5
+            pwr[i], fpeak[i] = get_peak(Af[i], fmin, fmax)
+            fpeak[i] *= adcSampleFrequency/symlenref[i]  # convert to Hz
+
+        fdev = np.abs(fpeak-self.refFreq)
+        ampf = np.sqrt(pwr)
+        min_ampf, max_ampf = min(ampf), max(ampf)
+
+        maxfdev = np.max(fdev)
+        ampdiff = 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
+
+        if DEBUG:
+            print('Symbol intervals and lengths:', symintervals, symlenref)
+            print('Frequency peaks [Hz]:', fpeak)
+            print('Frequency deviations [Hz]:', fdev)
+            print('Amplitude of symbols:', ampf)
+            print(f'Max frequency deviation: {maxfdev:.1f} Hz')
+            print(f'Max difference in symbol amplitudes: {ampdiff:.1f}%')
+        return ber, maxfdev, ampdiff, symintervals, If, Qf, Af
 
 
 class DTScenario:
