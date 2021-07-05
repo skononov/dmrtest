@@ -193,7 +193,7 @@ class DTSerialCom(metaclass=Singleton):
         rdata = frombuffer(response[2:], dtype=uint16, count=length)
 
         if DEBUG:
-            print(f'{source}: read data: {rdata}')
+            print(f'{source}: read {rdata} words: {rdata}')
 
         return rdata
 
