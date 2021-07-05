@@ -48,10 +48,8 @@ class DTConfiguration(metaclass=Singleton):
 
         if 'language' in self.config and self.config['language'] in ('ru', 'en'):
             dtg.LANG = self.config['language']
-        elif getenv('LANG')[:2] == 'ru':
-            dtg.LANG = 'ru'
         else:
-            dtg.LANG = 'en'
+            dtg.LANG = 'ru'
         print(f'Configuration loaded from {filename} with {nscenarios} scenarios')
 
         return True
