@@ -27,7 +27,7 @@ dtParameterDesc = {
                 'lowlim': 4, 'uplim': 16384, 'increment': 2, 'dunit': '1', 'format': '5.0f'},
     'frequency': {'ru': 'Несущая част.', 'en': 'Carrier freq.', 'type': Integral, 'default': 200*MHz,
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': 10*MHz,
+    'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': 10*kHz,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 50,
                'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
@@ -760,8 +760,8 @@ class DTMeasureSensitivity(DTTask):
     def measure(self):
         self.completed = False
         self.message = ''
-        self.results['THRESHOLD POWER'] = None
-        self.results['STATUS'] = None
+        for res in self.results:
+            self.results[res] = None
         if self.failed:
             return self
 
@@ -837,14 +837,15 @@ class DTMeasureSensitivity(DTTask):
         self.adcrange = tryrange
 
         if amax/ampuplim > 0.9:
-            self.set_error('LF input is out of ADC range' if dtg.LANG == 'en' else 'НЧ вход вне диапазона АЦП')
+            self.set_eval_error(f'Перегузка НЧ АЦП для диапазона {self.__adcVoltRange[tryrange]}В'
+                                if dtg.LANG == 'ru' else f'LF ADC overload for range {self.__adcVoltRange[tryrange]}V')
             return False
 
         self.buffer = self.com.command('GET ADC DAT', [3, bsize], nreply=bsize)
 
         inl = self.__eval_inl()
         if inl is None:
-            self.set_eval_error()
+            self.set_eval_error('КНИ не определен' if dtg.LANG == 'ru' else 'INL is not defined')
             return False
 
         if inl <= self.parameters['refinl']:
