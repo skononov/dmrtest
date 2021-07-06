@@ -8,7 +8,7 @@ static const int ang[] = {32768, 19344, 10220, 5188, 2604, 1303, 651, 325};
 static const int BITPRD = 25;
 static const int BITDEPTH = 10;
 static const unsigned char SAMPLEDIF = 3;
-static const int PHDIFF = 1415*SAMPLEDIF;			
+static const int PHDIFF = 1415*3;
 //pi/2 - 65536
 
 
@@ -17,7 +17,7 @@ static const int PHDIFF = 1415*SAMPLEDIF;
 
 #define FLTS 101
 static int RRCflt[FLTS] = {45,29,12,-5,-24,-44,-64,-85,-104,-124,-141,-158,-172,-185,-194,-201,-204,-204,-200,-191,-179,-162,-141,-115,-85,-51,-12,29,75,124,176,231,287,345,404,463,522,580,637,691,744,793,838,880,917,948,975,996,1011,1020,1024,1020,1011,996,975,948,917,880,838,793,744,691,637,580,522,463,404,345,287,231,176,124,75,29,-12,-51,-85,-115,-141,-162,-179,-191,-200,-204,-204,-201,-194,-185,-172,-158,-141,-124,-104,-85,-64,-44,-24,-5,12,29,45};
-static const int FLTGAIN = 22478;	
+static const int FLTGAIN = 22478;
 
 static unsigned int getbit(unsigned char *val, int vdiff)
 {
