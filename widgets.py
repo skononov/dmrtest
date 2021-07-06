@@ -460,7 +460,6 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
                 state = 'last'
             task: DTTask = scenario[index]
             taskFrame = DTTaskFrame(self.master, task, state)
-            task.load_cal()
             scenario[index] = taskFrame.task  # update scenario task
             taskFrame.grid(sticky=tk.W+tk.E+tk.N+tk.S)
             taskFrame.wait_variable(taskFrame.frameFinished)
@@ -497,7 +496,6 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
 
     def __chooseTask(self, taskType: DTTask):
         task: DTTask = taskType()
-        task.load_cal()
         task.set_id()  # set task ID in the main process
         taskFrame = DTTaskFrame(self.master, task)
         self.grid_forget()
@@ -739,23 +737,22 @@ class DTTaskFrame(tk.Frame):
         paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
         paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
 
-        resultTolFrame = tk.LabelFrame(self.rightFrame, text="ДОПУСКИ")
-        resultTolFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
-        resultTolFrame.grid(row=1, sticky=tk.W+tk.E+tk.N)
-
         self.parvars = dict()
+        self.parentries = dict()
 
         irow = 0
         for par in self.task.parameters:
             partuple = self.task.get_conv_par_all(par)
+            print(par, partuple)
             if partuple is None:
                 continue
 
             paramFrame.rowconfigure(irow, pad=5)
 
+            # distribute tuple to named variables
             pname, ptype, pvalue, plowlim, puplim, pincr, pavalues, pformat, punit, preadonly = partuple
 
-            tk.Label(paramFrame, text=pname+':', width=12).grid(row=irow, column=0, sticky=tk.E)
+            tk.Label(paramFrame, text=pname+':').grid(row=irow, column=0, sticky=tk.E)
 
             parvar = tk.StringVar()
             if ptype is Integral and isinstance(pvalue, Integral):
@@ -780,48 +777,11 @@ class DTTaskFrame(tk.Frame):
 
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-            tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
-
-            irow += 1
-        """
-        irow = 0
-        for res in self.task.results:
-            if res not in dtParameterDesc:
-                continue
-
-            resultTolFrame.rowconfigure(irow, pad=10)
-
-            name = dtResultDesc[res][dtg.LANG]
-            unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
-
-            tk.Label(paramFrame, text=name+':').grid(row=irow, column=0, sticky=tk.E)
-
-            parvar = tk.StringVar()
-            if ptype is Integral:
-                dvalue = str(int(pvalue))
-            else:
-                dvalue = str(pvalue).replace('.', ',')
-            parvar.set(dvalue)
-
-            self.parvars[par] = parvar
-
-            entry = tk.Spinbox(paramFrame, textvariable=parvar)
-            entry.configure(width=12, from_=plowlim, to=puplim, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
-                            justify=tk.RIGHT, format='%'+pformat)
-            self.wpars[str(entry)] = par
-            entry.bind('<Button>', __scrollEntry)
-            entry.bind('<Key>', __scrollEntry)
-            if pavalues is not None:
-                entry.configure(values=pavalues)
-            else:  # use increment
-                entry.configure(increment=pincr)
-
-            entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
+            self.parentries[par] = entry
 
             tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
 
             irow += 1
-            """
 
     def __createResults(self):
         resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
@@ -868,10 +828,13 @@ class DTTaskFrame(tk.Frame):
                 name = dtResultDesc[res][dtg.LANG]
                 unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
 
-                self.reslabels[res] = reslabel = tk.Label(resultFrame, text='----')
-                reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
-                                   font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
-                reslabel.grid(row=irow, column=icol+1, sticky=tk.W, padx=5)
+                valframe = tk.Frame(resultFrame, relief=tk.SUNKEN, bd=2,
+                                    bg=self.option_get('background', 'Entry'), padx=6, pady=2)
+                valframe.columnconfigure(0, minsize=100)
+                valframe.grid(row=irow, column=icol+1, sticky=tk.W+tk.E)
+                self.reslabels[res] = reslabel = tk.Label(valframe, text='----',
+                                                          font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
+                reslabel.grid(sticky=tk.E)
 
                 tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=icol+2, sticky=tk.W)
             else:
@@ -948,32 +911,35 @@ class DTTaskFrame(tk.Frame):
             self.message.configure(text='Неизвестное состояние', foreground='red')
             return
 
+        self.task.results_from(lastResult)
+
+        if hasattr(self.task, 'save_cal'):
+            self.task.save_cal()
+
+        allbadpars = []
         for res in self.reslabels:
             reslabel: tk.Label = self.reslabels[res]
             value = lastResult.get_conv_res(res)
             if value is not None:
                 fmt = f'%{dtResultDesc[res]["format"]}'
-                if isinstance(self.task, tasks.DTMeasureSensitivity) and res == 'THRESHOLD POWER':
-                    if lastResult.results['STATUS'] == -1:  # actual thr. power is lower
-                        reslabel.configure(fg='red')
-                        fmt = '<' + fmt
-                    elif lastResult.results['STATUS'] == 1:  # actual thr. power is higher
-                        reslabel.configure(fg='red')
-                        fmt = '>' + fmt
-                    elif lastResult.results['STATUS'] == 2:  # fluctuations
-                        reslabel.configure(fg='red')
-                        fmt = '~' + fmt
-                    else:
-                        reslabel.configure(fg='green')
-
-                if isinstance(self.task, tasks.DTMeasurePower) and res == 'OUTPOWER':
-                    # store calibration of output power to global parameters
-                    dtParameterDesc['refoutpower']['default'] = value
-                    dtParameterDesc['refatt']['default'] = self.task.parameters['att']
-
-                reslabel['text'] = fmt % value
+                ok, show, badpars = self.task.check_result(res)
+                if not ok:
+                    reslabel.configure(fg='red')
+                    self.bell()
+                else:
+                    reslabel.configure(fg=self.option_get('foreground', 'Label'))
+                reslabel['text'] = (show if show else '') + fmt % value
+                if badpars:
+                    allbadpars.extend(badpars)
             else:
+                reslabel.configure(fg=self.option_get('foreground', 'Label'))
                 reslabel['text'] = '----'
+
+            for par in self.parentries:
+                if par in allbadpars:
+                    self.parentries[par].configure(fg='red')
+                else:
+                    self.parentries[par].configure(fg=self.option_get('foreground', 'Spinbox'))
 
         self.__updateAndPlotGraphs()
 
@@ -1092,6 +1058,9 @@ class DTTaskFrame(tk.Frame):
 
         for par in self.parvars:
             self.task.set_conv_par(par, self.parvars[par].get())
+
+        if hasattr(self.task, 'load_cal'):
+            self.task.load_cal()
 
         self.task.set_id(self.task.id+1)  # increment id for the next run
         self.stoppedMsg = f'stopped {self.task.id}'

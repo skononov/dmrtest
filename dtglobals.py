@@ -25,6 +25,7 @@ units = {
     'dB': dict(multiple=1, quantity='attenuation', ru='дБ', en='dB'),
     'dBm': dict(multiple=1, quantity='logpower', ru='дБм', en='dBm'),
     '%': dict(multiple=0.01, quantity='fraction', ru='%', en='%'),
+    'ppm': dict(multiple=1e-6, quantity='fraction', ru='ppm', en='ppm'),
     '1': dict(multiple=1, quantity='dimensionless', ru='', en='')
     }
 

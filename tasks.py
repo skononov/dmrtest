@@ -4,6 +4,7 @@ import numpy as np
 from scipy.fft import rfft
 from scipy.signal import blackman
 from numbers import Integral, Real
+from traceback import print_exc
 
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
@@ -41,31 +42,34 @@ dtParameterDesc = {
                     'dunit': 'dBm', 'format': '5.1f', 'readonly': True},
     'noise': {'ru': 'Шум', 'en': 'Noise', 'type': Real, 'default': 0.1,
               'lowlim': 0, 'uplim': 3, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
-    # result target values and tolerances by default
-    'CARRIER FREQUENCY': {'target_value': 'frequency', 'abs_tolerance': kHz, 'rel_tolerance': 1e-4},
-    'INPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
-    'OUTPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
-    'INL': {'upper_value': 1},
-    'MODINDEX': {'target_value': 2, 'abs_tolerance': 0.1, 'rel_tolerance': 0.1},
-    'BITERR': {'upper_value': 1},
-    'BITPOWERDIF': {'target_value': 0, 'abs_tolerance': 0.1},
-    'BITFREQDEV': {'target_value': 0, 'abs_tolerance': 1},
-    'THRESHOLD POWER': {'upper_value': -10},
+    # result tolerance parameters
+    'CARRIER abstol': {'ru': '\u2206 f_н', 'en': '\u2206 f_c', 'type': Integral, 'default': 350*Hz,
+                       'lowlim': 1, 'uplim': 10*kHz, 'increment': 1, 'dunit': 'Hz', 
+                       'format': '5.0f'},
+    'CARRIER reltol': {'ru': '\u03B5 f_н', 'en': '\u03B5 f_c', 'type': Real, 'default': 2e-6,
+                            'lowlim': 1e-7, 'uplim': 1e-4, 'increment': 1e-7, 'dunit': 'ppm', 
+                            'format': '4.1f'},
+    'INL uplim': {'ru': 'КНИ\u21A7', 'en': 'INL\u21A7', 'type': Real, 'default': 0.05,
+                  'lowlim': 0.001, 'uplim': 1, 'increment': 0.001, 'dunit': '%', 'format': '5.1f'},
+    'BITERR uplim': {'ru': 'BER\u21A7', 'en': 'BER\u21A7', 'type': Real, 'default': 0.05,
+                     'lowlim': 0.001, 'uplim': 1, 'increment': 0.001, 'dunit': '%', 'format': '5.1f'}
 }
 
 # dict for results desciption
 dtResultDesc = {
-    'CARRIER FREQUENCY': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f'},
+    'CARRIER': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f', 
+                'tolerances': ['CARRIER abstol', 'CARRIER reltol'], 'reference': 'frequency'},
     'INPOWER': {'ru': 'Вх. P', 'en': 'In P', 'dunit': 'dBm', 'format': '5.1f'},
     'OUTPOWER': {'ru': 'Вых. P', 'en': 'Out P', 'dunit': 'dBm', 'format': '5.1f'},
-    'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f'},
+    'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f',
+            'tolerances': ['INL uplim']},
     'MODINDEX': {'ru': 'Индекс мод.', 'en': 'Mod/ index', 'dunit': '1', 'format': '4.2f'},
-    'BITERR': {'ru': 'BER', 'en': 'BER', 'dunit': '%', 'format': '5.1f'},
+    'BITERR': {'ru': 'BER', 'en': 'BER', 'dunit': '%', 'format': '5.1f',
+               'tolerances': ['BITERR uplim']},
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
     'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
     'THRESHOLD POWER': {'ru': 'Порог P', 'en': 'Thr. P', 'dunit': 'dBm', 'format': '5.1f'},
 }
-
 
 class DTTask:
     """ Base class for a task, usually measurement. It defines some common data and methods for
@@ -86,7 +90,7 @@ class DTTask:
 
     def __init__(self, parameters=None, results=None):
         """Constructor"""
-        global dtParameterDesc
+        global dtParameterDesc, dtResultDesc
         # parameter values of the task
         if parameters is None:
             self.parameters = dict()
@@ -101,6 +105,10 @@ class DTTask:
             self.results = dict()
         else:
             self.results = dict.fromkeys(results, None)
+            for res in self.results:
+                if res in dtResultDesc and 'tolerances' in dtResultDesc[res]:
+                    for par in dtResultDesc[res]['tolerances']:
+                        self.parameters[par] = dtParameterDesc[par]['default']
 
         self.message = ''  # message to be shown after execution
         self.failed = False  # if last task call is failed
@@ -110,11 +118,6 @@ class DTTask:
         self.com = None  # reference to DTSerialCom instance
         self.start = self.time = 0  # time of measurements
         self.id = None  # ID of the task (set once in the main process)
-
-    def load_cal(self):
-        """ This method can be implemented to load calibration from some storage or from dtParameterDesc
-        """
-        pass
 
     def init_meas(self, **kwargs):
         """ This method should be implemented to initialise the device just before the task run
@@ -151,7 +154,6 @@ class DTTask:
 
         global dtParameterDesc
         if par not in dtParameterDesc:
-            # raise DTInternalError(cls.__name__+'.check_parameter', f'Unknown parameter "{par}"')
             return False
 
         pardata = dtParameterDesc[par]
@@ -178,6 +180,71 @@ class DTTask:
 
         return ok
 
+    def parameters_changed(self):
+        """Returns True if any of parameter values are changed from the previous call"""
+        if not hasattr(self, 'prevparhash'):
+            self.prevparhash = 0
+        
+        curparhash = hash(tuple([parval for parval in self.parameters.values()]))
+        if self.prevparhash != curparhash:
+            self.prevparhash = curparhash
+            return True
+
+        return False
+
+    def check_result(self, res):
+        """Checks given result against tolerances and returns a tuple (ok, showchar, badpar)
+        ok - if at least one tolerance requirement is met by the result
+        showchar - character(s) to show before the result value in GUI
+        badpars - parameters of the tolerances that were not satisfied
+        """
+        global dtParameterDesc, dtResultDesc
+        if res not in dtResultDesc or 'tolerances' not in dtResultDesc[res]:
+            # no tolerance definition
+            return (True, None, None)
+        try:
+            ok = False
+            show = ''
+            badpars = []
+            reference = None  # reference parameter value to compare result with
+            if 'reference' in dtResultDesc[res]:
+                refpar = dtResultDesc[res]['reference']
+                reference = self.parameters[refpar]
+            resvalue = self.results[res]
+
+            for tolpar in dtResultDesc[res]['tolerances']:
+                tolvalue = self.parameters[tolpar]
+                toltype = tolpar.split(' ')[1]
+                if toltype == 'abstol' and reference is not None:
+                    if abs(reference-resvalue) <= tolvalue:
+                        ok = True
+                    else:
+                        show = '\u21D1'
+                        badpars.append(tolpar)
+                if toltype == 'reltol' and reference is not None and reference != 0:
+                    if abs(resvalue/reference-1) <= tolvalue:
+                        ok = True
+                    else:
+                        show = '\u21D1'
+                        badpars.append(tolpar)
+                if toltype == 'uplim':
+                    if resvalue <= tolvalue:
+                        ok = True
+                    else:
+                        show = '\u21D1'
+                        badpars.append(tolpar)
+                if toltype == 'lowlim':
+                    if resvalue > tolvalue:
+                        ok = True
+                    else:
+                        show = '\u21D3'
+                        badpars.append(tolpar)
+            return (ok, show, badpars)
+        except (KeyError, TypeError):
+            # some error
+            print_exc()
+            return (False, None, None)
+
     def get_conv_par_value(self, par):
         try:
             return self.parameters[par] / dtg.units[dtParameterDesc[par]['dunit']]['multiple']
@@ -187,8 +254,12 @@ class DTTask:
     def get_conv_par_all(self, par):
         global dtParameterDesc
         try:
-            pardesc = dtParameterDesc[par]
-            value = self.parameters[par]
+            if isinstance(par, tuple):
+                pardesc = dtParameterDesc[par[0]][par[1]]
+                value = self.parameters[par[0]][par[1]]
+            else:
+                pardesc = dtParameterDesc[par]
+                value = self.parameters[par]
         except KeyError:
             return None
         mult = dtg.units[pardesc['dunit']]['multiple']
@@ -204,7 +275,7 @@ class DTTask:
 
     def set_conv_par(self, par, value):
         global dtParameterDesc
-        if isinstance(value, str) and ',' in value:
+        if isinstance(value, str):
             value = value.replace(',', '.')
         if dtParameterDesc[par]['type'] is Real:
             value = float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
@@ -361,9 +432,6 @@ class DTMeasurePower(DTTask):
         self.inited = True
         return self
 
-    def __evalPower(self, counts):
-        return [c * self.adcCountToPower + self.minPowerRange for c in counts]
-
     def measure(self):
         self.completed = False
         self.message = ''
@@ -385,6 +453,15 @@ class DTMeasurePower(DTTask):
         self.set_success()
         return self
 
+    def save_cal(self):
+        global dtParameterDesc
+        if self.completed:
+            dtParameterDesc['refoutpower']['default'] = self.results['OUTPOWER']
+            dtParameterDesc['refatt']['default'] = self.parameters['att']
+
+    def __evalPower(self, counts):
+        return [c * self.adcCountToPower + self.minPowerRange for c in counts]
+
 
 class DTMeasureCarrierFrequency(DTTask):
     """
@@ -395,7 +472,7 @@ class DTMeasureCarrierFrequency(DTTask):
     name = dict(ru='Измерение несущей', en='Measuring carrier')
 
     def __init__(self):
-        super().__init__(('frequency', 'datanum'), ('CARRIER FREQUENCY', 'FFT'))
+        super().__init__(('frequency', 'datanum'), ('CARRIER', 'FFT'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -446,7 +523,7 @@ class DTMeasureCarrierFrequency(DTTask):
         if self.failed:
             return self
 
-        self.results['CARRIER FREQUENCY'] = cfreq
+        self.results['CARRIER'] = cfreq
 
         self.set_success()
 
@@ -726,6 +803,8 @@ class DTMeasureSensitivity(DTTask):
     # Input ranges of ADS868x in volts (assumed bipolar) in the order of code
     __adcVoltRange = (12.288, 10.240, 6.1440, 5.1200, 2.5600)
 
+    __outSymbols = {-1: '<', 0: '', 1: '>', 2: '~'}
+
     def __init__(self):
         super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
                          ('THRESHOLD POWER', 'STATUS'))
@@ -810,6 +889,15 @@ class DTMeasureSensitivity(DTTask):
         self.set_success()
 
         return self
+
+    def check_result(self, res):
+        if isinstance(self.task, self.__class__) and\
+           res == 'THRESHOLD POWER' and 'STATUS' in self.results:
+            status = self.results['STATUS']
+            return (status==0, self.__outSymbols[status])
+        else:
+            return (True, '')
+
 
     def __measure_inl_for_att(self, attcode: int):
         ampuplim = 0xFFFF
