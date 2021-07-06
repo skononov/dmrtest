@@ -6,9 +6,6 @@ from os import getenv
 from singleton import Singleton
 from traceback import print_exc
 
-__appname__ = 'DMR TEST'
-__version__ = '0.1'
-
 
 class DTConfiguration(metaclass=Singleton):
     """

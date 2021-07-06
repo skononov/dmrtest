@@ -1,4 +1,8 @@
 
+__appname__ = 'DMR TEST'
+__version__ = '0.1'
+
+
 Hz: int = 1
 kHz: int = 1000
 MHz: int = 1000000
@@ -23,3 +27,30 @@ units = {
     '%': dict(multiple=0.01, quantity='fraction', ru='%', en='%'),
     '1': dict(multiple=1, quantity='dimensionless', ru='', en='')
     }
+
+appInfo = dict(
+    ru = f"""
+        {__appname__} {__version__}
+        Тест цифрового передвижного радио от "ИТЦ Контур"
+
+        Для управления используйте манипулятор мышь или клавиатуру.
+        Управляющие клавиши:
+            Tab, Shift-Tab - передвижение между элементами
+            \u2191 \u2193 - передвижение по меню, прокрутка значений параметров
+            Space - нажатие кнопки, открытие меню, выбор пункта меню
+            Esc - выход из текущего окна или меню
+            Колесо мыши - прокрутка значений параметров
+        """,
+    en = f"""
+        {__appname__} {__version__} 
+        Test of Digital Mobile Radio by "ITC Kontur"
+
+        Use mouse or keyboard for control.
+        Controlling keys:
+            Tab, Shift-Tab - move between elements
+            \u2191 \u2193 - scroll menu, scrolling parameter values
+            Space - press a button, open a menu, choose a menu item
+            Esc - exit the current window or menu
+            Mouse wheel - scrolling parameter values
+        """
+)

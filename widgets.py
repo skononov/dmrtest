@@ -14,12 +14,13 @@ import tkinter.messagebox as tkmsg
 from multiprocessing import Pipe
 
 from process import DTProcess
-from config import DTConfiguration, __appname__, __version__
+from config import DTConfiguration
 from tasks import DTScenario, DTTask, dtTaskInit, dtParameterDesc, dtResultDesc
 from singleton import Singleton
 from dtexcept import DTComError, DTUIError
 import tasks
 import dtglobals as dtg
+from dtglobals import __appname__, __version__
 
 _rootWindowWidth = 1024
 _rootWindowHeight = 700
@@ -49,7 +50,7 @@ def _scrollEntry(event: tk.Event):
 
 
 class DTApplication(tk.Tk, metaclass=Singleton):
-    """ DMR TEST Application built with Tkinter
+    """ DMR TEST Application with Tkinter
     """
     DEBUG = False
 
@@ -518,14 +519,11 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         if self.master.logo is not None:
             label.configure(image=self.master.logo)
 
-        text = f"""
-            Информация о приложении {__appname__} {__version__}.
-            Информация о приложении {__appname__} {__version__}.
-            Информация о приложении {__appname__} {__version__}.
-            """
+        text = dtg.appInfo[dtg.LANG]
 
         # add a text Frame
-        textbox = tk.Text(self.logoFrame, padx="2m", pady="1m", wrap=tk.WORD)
+        textbox = tk.Text(self.logoFrame, padx="2m", pady="1m", wrap=tk.WORD,
+                          font={DEFAULT_FONT_FAMILY, BIG_FONT_SIZE})
 
         # add a vertical scrollbar to the frame
         # rightScrollbar = tk.Scrollbar(textboxFrame, orient=tk.VERTICAL, command=textbox.yview)
