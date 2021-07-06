@@ -29,16 +29,18 @@ dtParameterDesc = {
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
     'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': 10*kHz,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
-    'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 50,
-               'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '%', 'format': '5.1f'},
+    'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 0.5,
+               'lowlim': 0, 'uplim': 1, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     # 'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
     #            'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
-    'refinl': {'ru': 'Порог КНИ', 'en': 'Thr. INL', 'type': Real, 'default': 5,
-               'lowlim': 0.1, 'uplim': 100, 'increment': 0.5, 'dunit': '%', 'format': '5.1f'},
+    'refinl': {'ru': 'Порог КНИ', 'en': 'Thr. INL', 'type': Real, 'default': 0.05,
+               'lowlim': 0.01, 'uplim': 1, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     'refatt': {'ru': 'Опор. осл.', 'en': 'Ref. att.', 'type': Real, 'default': 31.5,
                'dunit': 'dB', 'format': '4.1f', 'readonly': True},
     'refoutpower': {'ru': 'Опор. мощн.', 'en': 'Ref. power', 'type': Real, 'default': 1,
                     'dunit': 'dBm', 'format': '5.1f', 'readonly': True},
+    'noise': {'ru': 'Шум', 'en': 'Noise', 'type': Real, 'default': 0.1,
+              'lowlim': 0, 'uplim': 3, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     # result target values and tolerances by default
     'CARRIER FREQUENCY': {'target_value': 'frequency', 'abs_tolerance': kHz, 'rel_tolerance': 1e-4},
     'INPOWER': {'target_value': 1, 'abs_tolerance': 0.01, 'rel_tolerance': 1e-2},
@@ -53,15 +55,15 @@ dtParameterDesc = {
 
 # dict for results desciption
 dtResultDesc = {
-    'CARRIER FREQUENCY': {'ru': 'Несущая частота', 'en': 'Carrier frequency', 'dunit': 'MHz', 'format': '10.6f'},
-    'INPOWER': {'ru': 'Входная мощность', 'en': 'Input power', 'dunit': 'dBm', 'format': '5.1f'},
-    'OUTPOWER': {'ru': 'Выходная мощность', 'en': 'Output power', 'dunit': 'dBm', 'format': '5.1f'},
+    'CARRIER FREQUENCY': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f'},
+    'INPOWER': {'ru': 'Вх. P', 'en': 'In P', 'dunit': 'dBm', 'format': '5.1f'},
+    'OUTPOWER': {'ru': 'Вых. P', 'en': 'Out P', 'dunit': 'dBm', 'format': '5.1f'},
     'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f'},
-    'MODINDEX': {'ru': 'Индекс модуляции', 'en': 'Modulation index', 'dunit': '1', 'format': '4.2f'},
-    'BITERR': {'ru': 'Ошибки битов', 'en': 'Bit errors', 'dunit': '%', 'format': '5.1f'},
-    'BITPOWERDIF': {'ru': 'Разброс мощности', 'en': 'Power spread', 'dunit': '%', 'format': '5.1f'},
-    'BITFREQDEV': {'ru': 'Отклонение частоты', 'en': 'Frequency deviation', 'dunit': 'Hz', 'format': '5.1f'},
-    'THRESHOLD POWER': {'ru': 'Пороговая мощность', 'en': 'Threshold power', 'dunit': 'dBm', 'format': '5.1f'},
+    'MODINDEX': {'ru': 'Индекс мод.', 'en': 'Mod/ index', 'dunit': '1', 'format': '4.2f'},
+    'BITERR': {'ru': 'BER', 'en': 'BER', 'dunit': '%', 'format': '5.1f'},
+    'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
+    'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
+    'THRESHOLD POWER': {'ru': 'Порог P', 'en': 'Thr. P', 'dunit': 'dBm', 'format': '5.1f'},
 }
 
 
@@ -195,12 +197,15 @@ class DTTask:
         uplim = pardesc['uplim']/mult if 'uplim' in pardesc else None
         increment = pardesc['increment']/mult if 'increment' in pardesc else None
         avalues = [val/mult for val in pardesc['values']] if 'values' in pardesc else None
-        return (pardesc[dtg.LANG], pardesc['type'], dvalue, lowlim,
-                uplim, increment, avalues,
-                pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG], 'readonly' in pardesc)
+        return (pardesc[dtg.LANG], pardesc['type'], dvalue, 
+                lowlim, uplim, increment, avalues,
+                pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG],
+                'readonly' in pardesc)
 
     def set_conv_par(self, par, value):
         global dtParameterDesc
+        if isinstance(value, str) and ',' in value:
+            value = value.replace(',', '.')
         if dtParameterDesc[par]['type'] is Real:
             value = float(value) * dtg.units[dtParameterDesc[par]['dunit']]['multiple']
         elif dtParameterDesc[par]['type'] is Integral:
@@ -283,7 +288,8 @@ class DTTask:
     def set_status_error(self, status: int):
         self.failed = True
         self.completed = False
-        self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') + self.__decode_status(status & 0x23)
+        self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') +\
+                        self.__decode_status(status & 0x23)
 
     def set_pll_error(self):
         self.failed = True
@@ -292,8 +298,7 @@ class DTTask:
 
 
 class DTCalibrate(DTTask):
-    """
-    Calibration.
+    """Calibration.
     """
     name = dict(ru='Калибровка', en='Calibration')
 
@@ -508,7 +513,7 @@ class DTMeasureNonlinearity(DTTask):
         if self.failed:
             return self
 
-        macode = int(self.parameters['modamp']/100*0xFFFF)
+        macode = int(self.parameters['modamp']*0xFFFF)
         mfcode = int(self.parameters['modfrequency']*120*kHz/(1 << 16)+0.5)
 
         self.foffset = 0
@@ -580,8 +585,6 @@ class DTMeasureNonlinearity(DTTask):
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
         inl, mi = get_inl(np.sqrt(If**2+Qf**2), fm)
-
-        inl *= 100  # transform INL to percent
 
         return inl, mi
 
@@ -677,7 +680,7 @@ class DTDMRInput(DTTask):
             self.set_eval_error(f'Too small data length - {len(self.buffer)}')
             return None
 
-        ber = 100.*numerr/numbit
+        ber = numerr/numbit
 
         return ber
 
@@ -871,7 +874,7 @@ class DTMeasureSensitivity(DTTask):
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
         inl, mi = get_inl(af, fm)
 
-        return 100*inl
+        return inl
 
 
 class DTDMRInputModel(DTTask):
@@ -881,9 +884,10 @@ class DTDMRInputModel(DTTask):
     name = dict(ru='Вход ЦР (модель)', en='DMR Input (model)')
 
     refFreq = DTDMRInput.refFreq
+    adcCountRange = 1<<15-1  # unipolar
 
     def __init__(self):
-        super().__init__(('frequency',), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
+        super().__init__(('frequency','noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
         homedir = getenv('HOME')
         self.ifilename, self.qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
         self.bufsize = 255*2*25*2
@@ -946,9 +950,13 @@ class DTDMRInputModel(DTTask):
             It = self.buffer[:self.bufsize//2]
             Qt = self.buffer[self.bufsize//2:]
 
+        ampNoise = self.parameters['noise']*self.adcCountRange
+        ampMax = self.adcCountRange
         # subtract the DC component for real data
-        It = np.around(It-np.mean(It)).astype('int32')
-        Qt = np.around(Qt-np.mean(Qt)).astype('int32')
+        It = np.clip(np.around(It-np.mean(It)).astype('int32') +\
+             (ampNoise*self.rng.normal(size=It.size)).astype('int32'), -ampMax, ampMax)
+        Qt = np.clip(np.around(Qt-np.mean(Qt)).astype('int32') +\
+             (ampNoise*self.rng.normal(size=Qt.size)).astype('int32'), -ampMax, ampMax)
 
         # find the bit error rate and constant symbol intervals
         maxlen = 20*200  # max length of returned Iref, Qref
@@ -958,10 +966,10 @@ class DTDMRInputModel(DTTask):
             self.set_eval_error(f'Too small data length - {len(self.buffer)}')
             return None
 
-        ber = 100.*numerr/numbit
+        ber = numerr/numbit
 
         if DEBUG:
-            print(f'Total bits: {numbit}, error bits: {numerr}, BER: {ber:.1f}%')
+            print(f'Total bits: {numbit}, error bits: {numerr}, BER: {100*ber:.1f}%')
 
         pwr = np.zeros(4, float)
         fpeak = np.zeros(4, float)
@@ -993,7 +1001,7 @@ class DTDMRInputModel(DTTask):
         min_ampf, max_ampf = min(ampf), max(ampf)
 
         maxfdev = np.max(fdev)
-        ampdiff = 100.*2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
+        ampdiff = 2*(max_ampf-min_ampf)/(min_ampf+max_ampf)
 
         if DEBUG:
             print('Symbol intervals and lengths:', symintervals, symlenref)
@@ -1001,7 +1009,7 @@ class DTDMRInputModel(DTTask):
             print('Frequency deviations [Hz]:', fdev)
             print('Amplitude of symbols:', ampf)
             print(f'Max frequency deviation: {maxfdev:.1f} Hz')
-            print(f'Max difference in symbol amplitudes: {ampdiff:.1f}%')
+            print(f'Max difference in symbol amplitudes: {100*ampdiff:.1f}%')
         return ber, maxfdev, ampdiff, symintervals, If, Qf, Af
 
 

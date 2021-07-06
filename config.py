@@ -32,7 +32,6 @@ class DTConfiguration(metaclass=Singleton):
 
         except Exception:
             print('DTConfiguration.load():', f'Could not read configuration from {filename}')
-            print_exc()
             self.config = dict()
             return False
 

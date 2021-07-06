@@ -38,6 +38,7 @@ MONOSPACE_FONT_FAMILY = "lucidasanstypewriter"
 BIG_FONT_SIZE = '14'
 DEFAULT_FONT_SIZE = '12'
 SMALL_FONT_SIZE = '10'
+LITTLE_FONT_SIZE = '9'
 
 
 def _scrollEntry(event: tk.Event):
@@ -139,15 +140,19 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
         # take some Tkinter colors for Matplotlib canvas
         plt.style.use('dark_background')
+        mpl.rcParams["font.size"] = int(SMALL_FONT_SIZE)
+        mpl.rcParams['axes.titlesize'] = int(SMALL_FONT_SIZE)
+        mpl.rcParams['axes.labelsize'] = int(SMALL_FONT_SIZE)
+        mpl.rcParams['xtick.labelsize'] = mpl.rcParams['ytick.labelsize'] = int(LITTLE_FONT_SIZE)
         mpl.rcParams['axes.facecolor'] = self.option_get('activeBackground', 'DTApplication')
         mpl.rcParams['figure.facecolor'] = self.option_get('activeBackground', 'DTApplication')
         mpl.rcParams['figure.edgecolor'] = self.option_get('background', 'DTApplication')
+        mpl.rcParams['lines.markersize'] = 4
         #mpl.rcParams["figure.dpi"] = 120
         mpl.rcParams["lines.linewidth"] = 1.5
         mpl.rcParams["grid.linewidth"] = 0.5
         mpl.rcParams["axes.linewidth"] = 1.0
         mpl.rcParams["axes.xmargin"] = 0.0
-        mpl.rcParams["font.size"] = 10
         mpl.rcParams["figure.constrained_layout.use"] = True
         mpl.rcParams["figure.constrained_layout.h_pad"] = 0.06
         mpl.rcParams["figure.constrained_layout.w_pad"] = 0.1
@@ -276,9 +281,10 @@ class DTPlotFrame(tk.Frame):
         frame.grid(row=0, sticky=tk.N+tk.E+tk.W)
         frame.columnconfigure(3, weight=1)
         frame.columnconfigure(7, weight=1)
+        frame.columnconfigure(10, weight=1)
 
         self.timeSpan = tk.IntVar()
-        self.timeSpan.set(10)
+        self.timeSpan.set(20)
         self.freqSpan = tk.IntVar()
         self.freqSpan.set(dtg.adcSampleFrequency//2)
 
@@ -291,7 +297,7 @@ class DTPlotFrame(tk.Frame):
         tk.Label(frame, text=('с' if dtg.LANG == 'ru' else 's'))\
             .grid(row=0, column=2, sticky=tk.W, padx=2)
 
-        tk.Label(frame, text='\u2206 F')\
+        tk.Label(frame, text='\u2206 f')\
             .grid(row=0, column=4, sticky=tk.E, padx=5)
         self.freqBox = fbox = tk.Spinbox(frame, textvariable=self.freqSpan, width=6)
         fbox.configure(from_=10, to=dtg.adcSampleFrequency//2, increment=10,
@@ -300,13 +306,13 @@ class DTPlotFrame(tk.Frame):
         tk.Label(frame, text=('Гц' if dtg.LANG == 'ru' else 'Hz'))\
             .grid(row=0, column=6, sticky=tk.W, padx=2)
 
-        tk.Label(frame, text=('Линия' if dtg.LANG == 'ru' else 'Line'))\
+        tk.Label(frame, text=('Стиль' if dtg.LANG == 'ru' else 'Style'))\
             .grid(row=0, column=8, sticky=tk.E, padx=5)
-        lineStyles = ('    ', ' -  ', ' -- ', ' : ')
-        self.lineStyle = tk.StringVar()
-        self.lineStyle.set(lineStyles[0])
-        menu = tk.OptionMenu(frame, self.lineStyle, *lineStyles)
-        menu.configure(takefocus=True)
+        styles = ('   .', '  -.', '   o', '  -o', '   ,')
+        self.styleVar = tk.StringVar()
+        self.styleVar.set(styles[0])
+        menu = tk.OptionMenu(frame, self.styleVar, *styles)
+        menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE})
         menu.grid(row=0, column=9, sticky=tk.W)
 
     def __createCanvas(self):
@@ -382,9 +388,11 @@ class DTPlotFrame(tk.Frame):
                         xlabel = 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]'
                     title = f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}'
 
-                ax.plot(x, y, '.', ls='', color=color)
+                ax.plot(x, y, color=color)
                 ax.set_xlabel(xlabel)
-                ax.lines[0].set_ls(self.lineStyle.get().strip())
+                ls, m = [('' if c == ' ' else c) for c in self.styleVar.get()[2:]]
+                ax.lines[0].set_ls(ls)
+                ax.lines[0].set_marker(m)
                 ax.set_title(title)
                 ax.set_xlim(*calc_xlim(x, result['type'] == 'time'))
                 ax.relim(True)
@@ -404,7 +412,9 @@ class DTPlotFrame(tk.Frame):
                     x = result['x']
                     y = result['y']
                 ax.lines[0].set_data(x, y)
-                ax.lines[0].set_ls(self.lineStyle.get().strip())
+                ls, m = [('' if c == ' ' else c) for c in self.styleVar.get()[2:]]
+                ax.lines[0].set_ls(ls)
+                ax.lines[0].set_marker(m)
                 ax.set_xlim(*calc_xlim(x, result['type'] == 'time'))
                 ax.relim(True)
                 ax.autoscale_view(tight=False)
@@ -688,6 +698,7 @@ class DTTaskFrame(tk.Frame):
         self.state = state
         self.direction = None
         self.resHistSize = 20000
+        self.maxResPerCol = 2  # maximum number of results per column
 
         # set when finished dealing with the current task
         self.frameFinished = tk.IntVar()
@@ -824,18 +835,37 @@ class DTTaskFrame(tk.Frame):
             self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
 
         try:
-            self.actplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/plot.gif')
-            self.inactplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/grayplot.gif')
+            mplcolors = mpl.rcParams["axes.prop_cycle"]
+            self.actplotimgs = [None]*len(mplcolors)
+            # self.actplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/plot.gif')
+            # self.inactplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/grayplot.gif')
+            self.actplotimg = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm', 
+                                             background='white')
+            for i, c in enumerate(mplcolors):
+                self.actplotimgs[i] = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm', 
+                                                     background=c['color'])
+                self.inactplotimg = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm',
+                                                   background=self.option_get('activeBackground', 'Checkbutton'))
         except tk.TclError:
+            print_exc()
             self.actplotimg = self.inactplotimg = None
 
         self.reslabels = dict()  # labels with results
         self.plotvars = dict()  # states of checkboxes controlling what vars to plot
         self.plotcbs = dict()  # plot Checkbuttons
 
-        irow = 0
-        for res in self.task.results:
-            resultFrame.rowconfigure(irow, pad=10)
+        for i in range(self.maxResPerCol):
+            resultFrame.rowconfigure(i, pad=10)
+
+        for i in range(len(self.task.results)//self.maxResPerCol+1):
+            resultFrame.columnconfigure(4*i, weight=1)
+            resultFrame.columnconfigure(4*i+3, weight=1)
+
+        irow = icol = 0
+        for i, res in enumerate(self.task.results):
+            irow = i % self.maxResPerCol
+            icol = 4 * (i // self.maxResPerCol)
+
             if res in dtResultDesc:
                 name = dtResultDesc[res][dtg.LANG]
                 unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
@@ -843,15 +873,13 @@ class DTTaskFrame(tk.Frame):
                 self.reslabels[res] = reslabel = tk.Label(resultFrame, text='----')
                 reslabel.configure(relief=tk.SUNKEN, padx=5, width=10, justify=tk.RIGHT,
                                    font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
-                reslabel.grid(row=irow, column=1, sticky=tk.W, padx=5)
+                reslabel.grid(row=irow, column=icol+1, sticky=tk.W, padx=5)
 
-                tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=2, sticky=tk.W)
-            elif res == 'FFT':
-                name = res
+                tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=icol+2, sticky=tk.W)
             else:
-                continue
+                name = res
 
-            tk.Label(resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=0, sticky=tk.E)
+            tk.Label(resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=icol, sticky=tk.E)
 
             self.plotvars[res] = tk.IntVar()
 
@@ -859,12 +887,10 @@ class DTTaskFrame(tk.Frame):
             cb.configure(indicatoron=0, variable=self.plotvars[res],
                          padx=3, pady=3)
             if self.actplotimg:
-                cb.configure(image=self.inactplotimg)
+                cb.configure(image=self.inactplotimg, selectimage=self.actplotimg)
             else:
                 cb.configure(text='Рисовать')
-            cb.grid(row=irow, column=3, padx=5)
-
-            irow += 1
+            cb.grid(row=irow, column=icol+3, padx=5, sticky=tk.W)
 
         self.__resetResHist()
 
@@ -983,12 +1009,14 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame.plotGraphs(self.presults)
 
     def __checkPlots(self):
+        actImgIter = iter(self.actplotimgs)
+        colorIter = iter(mpl.rcParams["axes.prop_cycle"])
         for res in self.plotcbs:
             cb: tk.Checkbutton = self.plotcbs[res]
             # Prepare for plotting results
             self.presults[res]['draw'] = draw = self.plotvars[res].get() != 0
-            if self.actplotimg is not None:
-                cb.configure(image=(self.actplotimg if draw else self.inactplotimg))
+            if draw:
+                cb.configure(selectimage=next(actImgIter), foreground=next(colorIter)['color'])
         self.plotFrame.plotGraphs(self.presults)
 
     def __resetResHist(self):
