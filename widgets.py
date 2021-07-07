@@ -1,9 +1,10 @@
 from numbers import Integral
 from os import access, R_OK, getpid, getenv
 from time import asctime
-from traceback import print_exc, format_exception_only
+from traceback import print_exc, format_exc, format_exception_only
 from io import FileIO
 import numpy as np
+from numpy.lib.function_base import copy
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -282,7 +283,6 @@ class DTPlotFrame(tk.Frame):
         frame.grid(row=0, sticky=tk.N+tk.E+tk.W)
         frame.columnconfigure(3, weight=1)
         frame.columnconfigure(7, weight=1)
-        frame.columnconfigure(10, weight=1)
 
         self.timeSpan = tk.IntVar()
         self.timeSpan.set(20)
@@ -681,7 +681,7 @@ class DTNewScenarioDialog(tk.Toplevel):
 class DTTaskFrame(tk.Frame):
     """ A frame rendered in the root window to manage task execution
     """
-    def __init__(self, master=None, task=None, state=None):
+    def __init__(self, master=None, task: DTTask=None, state=None):
         """ Constructor for a task front-end.
             task - DTTask object to be managed
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
@@ -693,15 +693,21 @@ class DTTaskFrame(tk.Frame):
         self.task = task
         self.state = state
         self.direction = None
-        self.resHistSize = 20000
+        self.resHistSize = 20000  # maximum number of points in history
         self.maxResPerCol = 2  # maximum number of results per column
 
         # set when finished dealing with the current task
         self.frameFinished = tk.IntVar()
 
+        self.tostop = tk.IntVar()
+        self.restart = tk.IntVar()
+
         self.__createWidgets()
 
+        #self.after(100, self.__runTask)  # start running immediately
+
     def __createWidgets(self):
+        """Build all widgets"""
         self.configure(padx=5, pady=5)
         availWidth = _rootWindowWidth-2*self.cget('padx')
         self.lw = int(0.6*availWidth)
@@ -724,15 +730,29 @@ class DTTaskFrame(tk.Frame):
         self.rightFrame.rowconfigure(2, weight=1)
         self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
 
-        self.tostop = tk.IntVar()
-
         self.__createStatusFrame()
         self.__createMenu()
         self.__createParameters()
         self.__createResults()
 
+    def __validatePar(self, wname, after):
+        widget = self.nametowidget(wname)
+        for par, parentry in self.parentries.items():
+            if parentry is widget:
+                break
+        if not DTTask.check_parameter(par, after):
+            widget.configure(bg='red')
+        else:
+            widget.configure(bg=widget.option_get('background', 'Spinbox'))
+            prevpar = self.task.parameters[par]
+            self.task.set_conv_par(par, after)
+            if prevpar != self.task.parameters[par] and par.split(' ')[0] not in self.task.results:
+                self.__flushPipe()
+                self.restart.set(1)
+        return True
+
     def __createParameters(self):
-        global __scrollEntry
+        """Create frame with parameters of the task"""
         paramFrame = tk.LabelFrame(self.rightFrame, text="ПАРАМЕТРЫ")
         paramFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
         paramFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
@@ -740,10 +760,11 @@ class DTTaskFrame(tk.Frame):
         self.parvars = dict()
         self.parentries = dict()
 
+        validateCall = self.register(self.__validatePar)
+
         irow = 0
         for par in self.task.parameters:
             partuple = self.task.get_conv_par_all(par)
-            print(par, partuple)
             if partuple is None:
                 continue
 
@@ -768,8 +789,10 @@ class DTTaskFrame(tk.Frame):
                 entry.configure(width=10, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
                                 justify=tk.RIGHT, relief=tk.SUNKEN)
             else:
-                entry = tk.Spinbox(paramFrame, textvariable=parvar)
-                entry.configure(width=10, from_=plowlim, to=puplim, justify=tk.RIGHT, format='%'+pformat)
+                self.parentries[par] = entry = tk.Spinbox(paramFrame, textvariable=parvar)
+                entry.configure(width=10, from_=plowlim, to=puplim, justify=tk.RIGHT, format='%'+pformat,
+                                validate='key', validatecommand=(validateCall, '%W', '%P'),
+                                bg=self.option_get('background', 'Spinbox'))
                 if pavalues is not None:
                     entry.configure(values=pavalues)
                 else:  # use increment
@@ -777,13 +800,12 @@ class DTTaskFrame(tk.Frame):
 
             entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
 
-            self.parentries[par] = entry
-
             tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
 
             irow += 1
 
     def __createResults(self):
+        """Create frame to show results of the task"""
         resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
         resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
         resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
@@ -829,8 +851,8 @@ class DTTaskFrame(tk.Frame):
                 unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
 
                 valframe = tk.Frame(resultFrame, relief=tk.SUNKEN, bd=2,
-                                    bg=self.option_get('background', 'Entry'), padx=6, pady=2)
-                valframe.columnconfigure(0, minsize=100)
+                                    bg=self.option_get('background', 'Entry'), padx=4, pady=2)
+                valframe.columnconfigure(0, minsize=135)
                 valframe.grid(row=irow, column=icol+1, sticky=tk.W+tk.E)
                 self.reslabels[res] = reslabel = tk.Label(valframe, text='----',
                                                           font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
@@ -859,8 +881,8 @@ class DTTaskFrame(tk.Frame):
         statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
         statusFrame.grid(row=2, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        self.message = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-80)
-        self.message.grid(sticky=tk.W+tk.E)
+        self.messagebox = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-80)
+        self.messagebox.grid(sticky=tk.W+tk.E)
         self.progress = -1
 
     def __createMenu(self):
@@ -893,22 +915,23 @@ class DTTaskFrame(tk.Frame):
     def __update(self):
         lastResult: DTTask = self.resultBuffer[-1]
         if lastResult.failed:
-            self.message.configure(text=lastResult.message, foreground='red')
+            self.messagebox.configure(text=lastResult.message, foreground='red')
             return
         elif self.task.single and lastResult.completed:
-            self.message.configure(text='ЗАВЕРШЕНО', foreground='green')
+            self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
             return
         elif lastResult.completed:
             self.progress += len(self.resultBuffer)
             if lastResult.message:
-                self.message.configure(text=lastResult.message, foreground='yellow')
+                self.messagebox.configure(text=lastResult.message, foreground='yellow')
             else:
-                self.message.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
+                self.messagebox.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
         elif lastResult.inited:
-            self.message.configure(text='ГОТОВ', foreground='green')
+            self.messagebox.configure(text='ГОТОВ', foreground='green')
             return
         else:
-            self.message.configure(text='Неизвестное состояние', foreground='red')
+            print(lastResult)
+            self.messagebox.configure(text='Неизвестное состояние', foreground='red')
             return
 
         self.task.results_from(lastResult)
@@ -951,11 +974,15 @@ class DTTaskFrame(tk.Frame):
                 n = presult['n']
                 nadd = len(self.resultBuffer)
                 if n + nadd > self.resHistSize:
+                    # copy previously gathered data but no more than 0.5 of resHistSize
+                    #  or data that plotted
                     startTime = self.resultBuffer[-1].time - timeSpan
-                    startIndex = np.searchsorted(presult['x'], startTime, side='left')
-                    presult['x'] = presult['x'][startIndex:]
-                    presult['y'] = presult['y'][startIndex:]
-                    n = presult['x'].size
+                    startCopyIndex = max(np.searchsorted(presult['x'], startTime, side='left'),
+                                         self.resHistSize//2)
+                    copySize = self.resHistSize - startCopyIndex
+                    presult['x'][:copySize] = presult['x'][startCopyIndex:]
+                    presult['y'][:copySize] = presult['y'][startCopyIndex:]
+                    n = copySize
                 for rtask in self.resultBuffer:
                     value = rtask.get_conv_res(res)
                     if value is not None:
@@ -1012,6 +1039,11 @@ class DTTaskFrame(tk.Frame):
                     print('DTTaskFrame.__checkRun(): User requested stop. Sending stop to DTProcess.')
                 raise DTUIError('stop run')
 
+            if self.restart.get() == 1:
+                if DTApplication.DEBUG:
+                    print(f'DTTaskFrame.__checkRun(): Parameters are changed. Restart run.')
+                raise DTUIError('restart run')
+
             self.resultBuffer = list()  # list of last DTTask-s with results
             while taskConn.poll():  # new task data are available for retrieving
                 msg = taskConn.recv()  # retrieve task object
@@ -1021,6 +1053,8 @@ class DTTaskFrame(tk.Frame):
                     if DTApplication.DEBUG:
                         print('DTTaskFrame.__checkRun(): Task run finished')
                     raise DTUIError('run stopped')
+                elif isinstance(msg, Exception):
+                    raise msg
 
             if len(self.resultBuffer) > 0:
                 if DTApplication.DEBUG:
@@ -1031,13 +1065,18 @@ class DTTaskFrame(tk.Frame):
             if isinstance(exc, DTUIError):
                 if exc.source == 'stop run':
                     taskConn.send('stop')
+                elif exc.source == 'restart run':
+                    taskConn.send('stop')
+                    self.after(100, self.__runTask)
+                    self.__configPauseButton()
+                    return
                 elif exc.source == 'run stopped':
                     if len(self.resultBuffer) > 0:
                         if DTApplication.DEBUG:
                             print(f'DTTaskFrame.__checkRun(): Last updating frame with task results')
                         self.__update()
             else:
-                print('DTTaskFrame.__checkRun(): Exception caught during frame update. Stopping task run.')
+                print('DTTaskFrame.__checkRun(): Exception caught. Stopping task run.')
                 print_exc()
                 tkmsg.showerror('Application error', format_exception_only(type(exc), exc))
             self.__flushPipe()
@@ -1049,7 +1088,8 @@ class DTTaskFrame(tk.Frame):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__runTask() entered')
         self.tostop.set(0)
-        self.message.configure(text='')
+        self.restart.set(0)
+        self.messagebox.configure(text='')
         self.progress = 0
         # clear leftovers in the pipe
         self.__flushPipe()
@@ -1079,10 +1119,15 @@ class DTTaskFrame(tk.Frame):
         FileIO(fd, 'r', closefd=False).flush()
 
     def __configStartButton(self):
-        self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A', activebackground='#3CA54D')
+        self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A', activebackground='#3CA54D',
+                                   state=tk.NORMAL)
 
     def __configStopButton(self):
-        self.startButton.configure(text='Остановить', command=self.__stopRun, bg='#A50D00', activebackground='#C63519')
+        self.startButton.configure(text='Остановить', command=self.__stopRun, bg='#A50D00', activebackground='#C63519',
+                                   state=tk.NORMAL)
+
+    def __configPauseButton(self):
+        self.startButton.configure(state=tk.DISABLED)
 
     def __stopRun(self):
         if DTApplication.DEBUG:

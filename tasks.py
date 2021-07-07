@@ -148,7 +148,7 @@ class DTTask:
     @classmethod
     def check_parameter(cls, par: str, value):
         """ Check parameter value and return True if it's valid or False otherwise.
-            All values considered to be float.
+            value may be float, int or str. In the latter case it is converted to internal units.
             If expected parameter type is Integral, check float value has no fractions.
         """
 
@@ -157,10 +157,19 @@ class DTTask:
             return False
 
         pardata = dtParameterDesc[par]
+
+        if isinstance(value, str):
+            try:
+                value = float(value.replace(',', '.')) * dtg.units[pardata['dunit']]['multiple']
+            except ValueError:
+                return False
+
         if pardata['type'] is Integral and value != int(value):
             return False
+
         if 'uplim' in pardata and (value > pardata['uplim'] or value < pardata['lowlim']):
             return False
+
         return True
 
     def check_all_parameters(self):
@@ -179,18 +188,6 @@ class DTTask:
                         (' вне диапазона' if dtg.LANG == 'ru' else ' out of range')
 
         return ok
-
-    def parameters_changed(self):
-        """Returns True if any of parameter values are changed from the previous call"""
-        if not hasattr(self, 'prevparhash'):
-            self.prevparhash = 0
-        
-        curparhash = hash(tuple([parval for parval in self.parameters.values()]))
-        if self.prevparhash != curparhash:
-            self.prevparhash = curparhash
-            return True
-
-        return False
 
     def check_result(self, res):
         """Checks given result against tolerances and returns a tuple (ok, showchar, badpar)
@@ -366,6 +363,12 @@ class DTTask:
         self.failed = True
         self.completed = False
         self.message = 'Ошибка PLL демодулятора' if dtg.LANG == 'ru' else 'Demodulator PLL error'
+
+    def __repr__(self):
+        attrs = vars(self)
+        return f'<class {self.__class__.__name__} at 0x{id(self):x}:\n\t' +\
+               '\n\t'.join("%s: %s" % item for item in attrs.items()) +\
+               '\n>'
 
 
 class DTCalibrate(DTTask):
@@ -977,8 +980,15 @@ class DTDMRInputModel(DTTask):
     def __init__(self):
         super().__init__(('frequency','noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
         homedir = getenv('HOME')
-        self.ifilename, self.qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
+        ifilename, qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
         self.bufsize = 255*2*25*2
+        self.ibuffer = self.qbuffer = None
+        try:
+            self.ibuffer = np.genfromtxt(ifilename, dtype='int32', delimiter='\n')
+            self.qbuffer = np.genfromtxt(qfilename, dtype='int32', delimiter='\n')
+            print(f'DTDMRInputModel: Data loaded with length of {self.ibuffer.size}')
+        except Exception as exc:
+            print_exc()
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs, autotest=True)
@@ -987,17 +997,13 @@ class DTDMRInputModel(DTTask):
 
         self.rng = np.random.default_rng(int(time()))
 
-        try:
-            self.ibuffer = np.genfromtxt(self.ifilename, dtype='int32', delimiter='\n')
-            self.qbuffer = np.genfromtxt(self.qfilename, dtype='int32', delimiter='\n')
-            print(f'Data loaded with length of {self.ibuffer.size}')
-        except Exception as exc:
-            self.set_error('Error loading data files\n' + str(exc))
-            return self
+        if self.ibuffer is None or self.qbuffer is None:
+            self.set_error('Data are not loaded from files')
 
         if self.ibuffer.size != self.qbuffer.size or self.ibuffer.size < self.bufsize//2:
-            self.set_error(f'Wrong length of I or Q data ({self.ibuffer.size}, {self.qbuffer.size})')
+            self.set_error(f'Wrong length of I or Q data ({self.ibuffer.size}, {self.qbuffer.size})', False)
 
+        self.inited = True
         return self
 
     def measure(self):

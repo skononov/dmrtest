@@ -1,4 +1,7 @@
+from dtexcept import DTInternalError
 from time import time
+
+from numpy.lib.arraysetops import isin
 import tasks
 from tasks import DTTask, DTCalibrate
 from dtcom import DTSerialCom
@@ -24,7 +27,7 @@ class DTProcess(Process):
 
         self.caltask.init_meas()
         if self.caltask.failed:
-            print(self.caltask.message)
+            print('Calibration error:', self.caltask.message)
         self.prevCalTime = time()
 
     def run(self):
@@ -38,7 +41,7 @@ class DTProcess(Process):
             # periodic calibration
             if time() - self.prevCalTime >= self.calibPeriod:
                 self.calibrate()
-            if not self.conn.poll(10):
+            if not self.conn.poll(self.calibPeriod/10):
                 continue
             obj = self.conn.recv()
             if isinstance(obj, DTTask):
@@ -63,28 +66,32 @@ class DTProcess(Process):
 
         msg = None
 
-        task.init_meas()
-
-        if self.conn.poll():
-            msg = self.conn.recv()
-
-        if task.failed or task.completed or msg == 'stop':
+        try:
+            task.init_meas()
             self.__sendResults(task)
-            if self.DEBUG:
-                print('DTProcess: task stopped after init')
-        else:  # continue with the measurements
-            while msg != 'stop':
-                task.measure()
-                self.__sendResults(task)
-                if task.failed:
-                    break
-                if self.conn.poll():
-                    msg = self.conn.recv()
 
-        self.conn.send(f'stopped {task.id}')
-        FileIO(self.conn.fileno(), 'r', closefd=False).flush()  # flush input messages
-        if self.DEBUG:
-            print(f'DTProcess: Task "{task.name["en"]}" finished')
+            if self.conn.poll():
+                msg = self.conn.recv()
+
+            if task.failed or task.completed or msg == 'stop':
+                if self.DEBUG:
+                    print('DTProcess: task stopped after init')
+            else:  # continue with the measurements
+                while msg != 'stop':
+                    task.measure()
+                    self.__sendResults(task)
+                    if task.failed:
+                        break
+                    if self.conn.poll():
+                        msg = self.conn.recv()
+
+        except Exception as exc:
+            self.conn.send(exc)
+        finally:
+            self.conn.send(f'stopped {task.id}')
+            FileIO(self.conn.fileno(), 'r', closefd=False).flush()  # flush input messages
+            if self.DEBUG:
+                print(f'DTProcess: Task "{task.name["en"]}" finished')
 
     def __sendResults(self, task: DTTask):
         if self.DEBUG:
