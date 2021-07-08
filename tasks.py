@@ -147,6 +147,16 @@ class DTTask:
         """
         return self
 
+    def load_cal(self):
+        """ Loading calibration of output power. Called from the main process where dtParameterDesc is kept up to date.
+        """
+        global DEBUG, dtParameterDesc
+        if DEBUG:
+            print(self.__class__.__name__+'.load_cal(): calibration is loaded')
+        for par in ('refatt', 'refoutpower'):
+            if par in self.parameters:
+                self.parameters[par] = dtParameterDesc[par]['default']
+
     @classmethod
     def check_parameter(cls, par: str, value):
         """ Check parameter value and return True if it's valid or False otherwise.
@@ -777,7 +787,7 @@ class DTDMROutput(DTTask):
     name = dict(ru='Выход ЦР', en='DMR Output')
 
     def __init__(self):
-        super().__init__(('frequency', 'att'))
+        super().__init__(('frequency', 'att', 'refatt', 'refoutpower'), ('OUTPOWER',))
         self.single = True
 
     def init_meas(self, **kwargs):
@@ -797,6 +807,9 @@ class DTDMROutput(DTTask):
             self.set_com_error(exc)
             return self
 
+
+        self.results['OUTPOWER'] = self.parameters['refoutpower'] + self.parameters['refatt'] - self.parameters['att']
+
         self.set_success()
         self.inited = True
         return self
@@ -814,15 +827,6 @@ class DTMeasureSensitivity(DTTask):
         super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
                          ('THRESHOLD POWER', 'FFT', 'STATUS'))
         self.buffer = None
-
-    def load_cal(self):
-        """ Loading calibration of output power. Called from the main process where dtParameterDesc is kept up to date.
-        """
-        global DEBUG, dtParameterDesc
-        if DEBUG:
-            print('DTMeasureSensitivity.load_cal(): calibration is loaded')
-        for par in ('refatt', 'refoutpower'):
-            self.parameters[par] = dtParameterDesc[par]['default']
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
