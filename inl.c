@@ -27,16 +27,17 @@ int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfp
 
 	*pfpeak = *ppwr = 0;
 
+	if(fmin == fmax) return 0;
+
 	int fpeak = fmin;
 	double pwr = 0;
 	for(int i=fmin; i<=fmax; i++) {
 		if(amp[i]>amp[fpeak]) fpeak = i;
 	}
-	//if(fpeak==fmin || fpeak==fmax) return 0;
 	pwr = amp[fpeak]*amp[fpeak];
-	if(pwr==0) return 0;
+	if(pwr == 0) return 0;
 	
-	int bp = fpeak+1, bm = fpeak-1;
+	int bp = fpeak, bm = fpeak;
 	double pnew;
 	int out;
 	while (bp <= fmax || bm >= fmin)
@@ -69,7 +70,7 @@ int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfp
 	}
 	*pfpeak /= *ppwr;
 
-	if(bp>fmax || bm<fmin) return 0;
+	//if(bp>fmax || bm<fmin) return 0;
 
 	return 1;
 }
