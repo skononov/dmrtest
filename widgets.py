@@ -297,10 +297,10 @@ class DTPlotFrame(tk.Frame):
         frame.columnconfigure(3, weight=1)
         frame.columnconfigure(7, weight=1)
 
-        self.timeSpanVar = tk.IntVar()
-        self.timeSpanVar.set(20)
-        self.freqSpanVar = tk.IntVar()
-        self.freqSpanVar.set(dtg.adcSampleFrequency//2)
+        self.timeSpanVar = tk.StringVar()
+        self.timeSpanVar.set('20')
+        self.freqSpanVar = tk.StringVar()
+        self.freqSpanVar.set(f'{dtg.adcSampleFrequency//2}')
 
         tk.Label(frame, text='\u2206 T')\
             .grid(row=0, column=0, sticky=tk.E, padx=5)
@@ -330,8 +330,12 @@ class DTPlotFrame(tk.Frame):
         menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE})
         menu.grid(row=0, column=9, sticky=tk.W)
 
+        self.updateScheduled = False
+
         self.controlVars = dict()
         for widget, var in ((tbox, self.timeSpanVar), (fbox, self.freqSpanVar), (menu, self.styleVar)):
+            widget.bind('<Button-4>', self.__changeControlHandler)
+            widget.bind('<Button-5>', self.__changeControlHandler)
             widget.bind('<FocusOut>', self.__changeControlHandler)
             widget.bind('<Key-Return>', self.__changeControlHandler)
             self.controlVars[id(widget)] = [var, var.get()]
@@ -348,17 +352,30 @@ class DTPlotFrame(tk.Frame):
         canvasWidget.grid(row=1)
         self.updateFigSize = True
 
-    def getTimeSpan(self):
-        return self.timeSpanVar.get()
+    @property
+    def timeSpan(self):
+        try:
+            return int(self.timeSpanVar.get())
+        except ValueError:
+            self.timeSpanVar.set('20')
+            return 20
+
+    @property
+    def freqSpan(self):
+        try:
+            return int(self.freqSpanVar.get())
+        except ValueError:
+            self.freqSpanVar.set('60000')
+            return 60000
 
     def __calcXlim(self, x, istime: bool):
         first = x[0] if x.size > 0 else 0
         last = x[-1] if x.size > 0 else 1
         if istime:
-            xmax = max(int(last+1), int(first) + self.timeSpanVar.get())
-            xmin = max(int(first), xmax-self.timeSpanVar.get())
+            xmax = max(int(last+1), int(first) + self.timeSpan)
+            xmin = max(int(first), xmax-self.timeSpan)
         else:
-            xmax = min(last+1, self.freqSpanVar.get())
+            xmax = min(last+1, self.freqSpan)
             xmin = 0
         return xmin, xmax
 
@@ -372,7 +389,7 @@ class DTPlotFrame(tk.Frame):
             h, w = self.canvasFrame.winfo_height(), self.canvasFrame.winfo_width()
             # print(w, h)
             dpi = self.figure.dpi
-            self.figure.set_size_inches(0.93*w/dpi, h/dpi)  # real dpi differs?
+            self.figure.set_size_inches(w/dpi, h/dpi)  # real dpi differs?
             self.updateFigSize = False
 
         if not hasattr(self, 'pkeys'):
@@ -468,14 +485,16 @@ class DTPlotFrame(tk.Frame):
     def __changeControlHandler(self, event: tk.Event):
         w: tk.Widget = event.widget
         for wid, (var, prev) in self.controlVars.items():
-            if wid == id(w):
+            if wid == id(w) and var is not self.styleVar:
                 try:
-                    var.set(np.clip(var.get(), w['from_'], w['to']))
-                except tk.TclError:
-                    pass
+                    val = np.clip(int(var.get()), int(w['from']), int(w['to']))
+                except ValueError:
+                    val = int(prev)
+                var.set(str(val))
             if var.get() != prev:
                 prev = var.get()
-                if not hasattr(self, 'updateScheduled') or not self.updateScheduled:
+                if not self.updateScheduled:
+                    print('Schedule update')
                     self.updateScheduled = True
                     self.after(500, self.__updateAxes())
 
@@ -1021,7 +1040,7 @@ class DTTaskFrame(tk.Frame):
         self.__updateAndPlotGraphs()
 
     def __updateAndPlotGraphs(self):
-        timeSpan = self.plotFrame.getTimeSpan()
+        timeSpan = self.plotFrame.timeSpan
         for res in self.plotvars:
             presult = self.presults[res]
             if presult['type'] == 'time':
