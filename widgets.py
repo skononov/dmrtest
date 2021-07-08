@@ -286,6 +286,7 @@ class DTPlotFrame(tk.Frame):
         self.figure = None
         self.gridOn = True  # flag for adding grid to exes
         self.configure(padx=3, pady=3)
+        self.columnconfigure(0, minsize=int(0.6*_rootWindowWidth))
         self.rowconfigure(0, pad=5)
         self.rowconfigure(1, weight=1)
         self.__createControls()
@@ -494,9 +495,8 @@ class DTPlotFrame(tk.Frame):
             if var.get() != prev:
                 prev = var.get()
                 if not self.updateScheduled:
-                    print('Schedule update')
                     self.updateScheduled = True
-                    self.after(500, self.__updateAxes())
+                    self.after(1000, self.__updateAxes())
 
     def clearCanvas(self):
         self.figure.clf()
@@ -783,25 +783,24 @@ class DTTaskFrame(tk.Frame):
 
     def __createWidgets(self):
         """Build all widgets"""
-        self.configure(padx=5, pady=5)
+        self.configure(padx=10, pady=5)
         availWidth = _rootWindowWidth-2*self.cget('padx')
-        self.lw = int(0.6*availWidth)
-        self.rw = availWidth-self.lw
+        self.rowconfigure(0, pad=10)
         self.rowconfigure(1, weight=1)
-        self.columnconfigure(0, minsize=self.lw)
+        self.columnconfigure(0, weight=6)
         self.columnconfigure(1, weight=4)
 
         tk.Label(self, text=self.task.name[dtg.LANG], height=2, relief=tk.GROOVE,
                  borderwidth=3, font=(DEFAULT_FONT_FAMILY, BIG_FONT_SIZE))\
-            .grid(row=0, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E+tk.N)
+            .grid(row=0, column=0, columnspan=2, sticky=tk.W+tk.E+tk.N)
 
-        self.leftFrame = tk.Frame(self, padx=5, pady=5)
+        self.leftFrame = tk.Frame(self)
         self.leftFrame.rowconfigure(1, weight=1)
-        self.leftFrame.grid(row=1, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
+        self.leftFrame.grid(row=1, column=0, sticky=tk.N+tk.S+tk.W)
 
-        self.rightFrame = tk.Frame(self, padx=5, pady=5)
+        self.rightFrame = tk.Frame(self)
         self.rightFrame.rowconfigure(2, weight=1)
-        self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
+        self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.E)
 
         self.__createStatusFrame()
         self.__createMenu()
@@ -879,11 +878,13 @@ class DTTaskFrame(tk.Frame):
         """Create frame to show results of the task"""
         resultFrame = tk.LabelFrame(self.leftFrame, text='ИЗМЕРЕНИЕ')
         resultFrame.configure(labelanchor='n', padx=10, pady=5, relief=tk.GROOVE, borderwidth=3)
-        resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N, pady=5)
+        resultFrame.grid(row=0, sticky=tk.W+tk.E+tk.N)
 
         if not self.task.single:
             self.plotFrame = DTPlotFrame(self.leftFrame)
             self.plotFrame.grid(row=1, sticky=tk.W+tk.E+tk.S)
+        else:
+            self.plotFrame = None
 
         try:
             mplcolors = mpl.rcParams["axes.prop_cycle"]
@@ -938,6 +939,9 @@ class DTTaskFrame(tk.Frame):
 
             tk.Label(resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=icol, sticky=tk.E)
 
+            if self.plotFrame is None:
+                continue
+
             self.plotvars[res] = tk.IntVar()
 
             cb = self.plotcbs[res] = tk.Checkbutton(resultFrame, command=self.__checkPlots)
@@ -954,7 +958,7 @@ class DTTaskFrame(tk.Frame):
         statusFrame = tk.Frame(self.rightFrame, relief=tk.SUNKEN, bd=2, padx=5, pady=3)
         statusFrame.grid(row=2, sticky=tk.W+tk.E+tk.N, pady=5)
 
-        self.messagebox = tk.Message(statusFrame, justify=tk.LEFT, width=self.rw-80)
+        self.messagebox = tk.Message(statusFrame, justify=tk.LEFT, width=300)
         self.messagebox.grid(sticky=tk.W+tk.E)
         self.progress = -1
 
@@ -989,6 +993,7 @@ class DTTaskFrame(tk.Frame):
         lastResult: DTTask = self.resultBuffer[-1]
         if lastResult.failed:
             self.messagebox.configure(text=lastResult.message, foreground='red')
+            self.bell()
             return
         elif self.task.single and lastResult.completed:
             self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
@@ -1040,6 +1045,8 @@ class DTTaskFrame(tk.Frame):
         self.__updateAndPlotGraphs()
 
     def __updateAndPlotGraphs(self):
+        if self.plotFrame is None:
+            return
         timeSpan = self.plotFrame.timeSpan
         for res in self.plotvars:
             presult = self.presults[res]
@@ -1073,6 +1080,8 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame.plotGraphs(self.presults)
 
     def __checkPlots(self):
+        if self.plotFrame is None:
+            return
         actImgIter = iter(self.actplotimgs)
         colorIter = iter(mpl.rcParams["axes.prop_cycle"])
         for res in self.plotcbs:
