@@ -331,14 +331,17 @@ class DTPlotFrame(tk.Frame):
         menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE})
         menu.grid(row=0, column=9, sticky=tk.W)
 
-        self.updateScheduled = False
-
         self.controlVars = dict()
         for widget, var in ((tbox, self.timeSpanVar), (fbox, self.freqSpanVar), (menu, self.styleVar)):
-            widget.bind('<Button-4>', self.__changeControlHandler)
-            widget.bind('<Button-5>', self.__changeControlHandler)
-            widget.bind('<FocusOut>', self.__changeControlHandler)
-            widget.bind('<Key-Return>', self.__changeControlHandler)
+            """
+            if widget == menu:
+                widget.bind('<ButtonRelease-1>', self.__changeControlHandler)
+            else:
+                widget.bind('<Button-4>', self.__changeControlHandler)
+                widget.bind('<Button-5>', self.__changeControlHandler)
+                widget.bind('<FocusOut>', self.__changeControlHandler)
+                widget.bind('<Key-Return>', self.__changeControlHandler)
+            """
             self.controlVars[id(widget)] = [var, var.get()]
 
     def __createCanvas(self):
@@ -352,6 +355,7 @@ class DTPlotFrame(tk.Frame):
         canvasWidget.configure(bg=LIGHT_BG_COLOR, takefocus=False)  # not styled previously, why?
         canvasWidget.grid(row=1)
         self.updateFigSize = True
+        self.updateScheduled = False
 
     @property
     def timeSpan(self):
@@ -461,8 +465,12 @@ class DTPlotFrame(tk.Frame):
 
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
+        if not self.updateScheduled:
+            self.after(100, self.__updateAxes)
+            self.updateScheduled = True
 
     def __updateAxes(self):
+        self.updateScheduled = False
         if self.figure is None:
             return
         axes = self.figure.axes
@@ -481,22 +489,8 @@ class DTPlotFrame(tk.Frame):
             ax.autoscale_view(tight=False)
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
-        self.updateScheduled = False
-
-    def __changeControlHandler(self, event: tk.Event):
-        w: tk.Widget = event.widget
-        for wid, (var, prev) in self.controlVars.items():
-            if wid == id(w) and var is not self.styleVar:
-                try:
-                    val = np.clip(int(var.get()), int(w['from']), int(w['to']))
-                except ValueError:
-                    val = int(prev)
-                var.set(str(val))
-            if var.get() != prev:
-                prev = var.get()
-                if not self.updateScheduled:
-                    self.updateScheduled = True
-                    self.after(1000, self.__updateAxes())
+        self.after(1000, self.__updateAxes)
+        self.updateScheduled = True
 
     def clearCanvas(self):
         self.figure.clf()
