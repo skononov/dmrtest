@@ -9,7 +9,7 @@ from traceback import print_exc
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
 from dt_c_api import get_peak, get_inl, get_ber
-from dtglobals import Hz, kHz, MHz, adcSampleFrequency, symbolDevFrequency
+from dtglobals import Hz, kHz, MHz, adcSampleFrequency, symbolDevFrequency, lfAdcVoltRanges, hfAdcRange, adcCountRange
 import dtglobals as dtg  # for dtg.LANG
 
 dtTaskTypes = None
@@ -44,11 +44,11 @@ dtParameterDesc = {
               'lowlim': 0, 'uplim': 3, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     # result tolerance parameters
     'CARRIER abstol': {'ru': '\u2206 f_н', 'en': '\u2206 f_c', 'type': Integral, 'default': 350*Hz,
-                       'lowlim': 1, 'uplim': 10*kHz, 'increment': 1, 'dunit': 'Hz', 
+                       'lowlim': 1, 'uplim': 10*kHz, 'increment': 1, 'dunit': 'Hz',
                        'format': '5.0f'},
     'CARRIER reltol': {'ru': '\u03B5 f_н', 'en': '\u03B5 f_c', 'type': Real, 'default': 2e-6,
-                            'lowlim': 1e-7, 'uplim': 1e-4, 'increment': 1e-7, 'dunit': 'ppm', 
-                            'format': '4.1f'},
+                       'lowlim': 1e-7, 'uplim': 1e-4, 'increment': 1e-7, 'dunit': 'ppm',
+                       'format': '4.1f'},
     'INL uplim': {'ru': 'КНИ\u21A7', 'en': 'INL\u21A7', 'type': Real, 'default': 0.05,
                   'lowlim': 0.001, 'uplim': 1, 'increment': 0.001, 'dunit': '%', 'format': '5.1f'},
     'BITERR uplim': {'ru': 'BER\u21A7', 'en': 'BER\u21A7', 'type': Real, 'default': 0.05,
@@ -57,7 +57,7 @@ dtParameterDesc = {
 
 # dict for results desciption
 dtResultDesc = {
-    'CARRIER': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f', 
+    'CARRIER': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f',
                 'tolerances': ['CARRIER abstol', 'CARRIER reltol'], 'reference': 'frequency'},
     'INPOWER': {'ru': 'Вх. P', 'en': 'In P', 'dunit': 'dBm', 'format': '5.1f'},
     'OUTPOWER': {'ru': 'Вых. P', 'en': 'Out P', 'dunit': 'dBm', 'format': '5.1f'},
@@ -69,7 +69,9 @@ dtResultDesc = {
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
     'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
     'THRESHOLD POWER': {'ru': 'Порог P', 'en': 'Thr. P', 'dunit': 'dBm', 'format': '5.1f'},
+    'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'none', 'format': ''}
 }
+
 
 class DTTask:
     """ Base class for a task, usually measurement. It defines some common data and methods for
@@ -265,7 +267,7 @@ class DTTask:
         uplim = pardesc['uplim']/mult if 'uplim' in pardesc else None
         increment = pardesc['increment']/mult if 'increment' in pardesc else None
         avalues = [val/mult for val in pardesc['values']] if 'values' in pardesc else None
-        return (pardesc[dtg.LANG], pardesc['type'], dvalue, 
+        return (pardesc[dtg.LANG], pardesc['type'], dvalue,
                 lowlim, uplim, increment, avalues,
                 pardesc['format'], dtg.units[pardesc['dunit']][dtg.LANG],
                 'readonly' in pardesc)
@@ -357,7 +359,7 @@ class DTTask:
         self.failed = True
         self.completed = False
         self.message = ('Ошибка статуса:\n' if dtg.LANG == 'ru' else 'Status error:\n') +\
-                        self.__decode_status(status & 0x23)
+            self.__decode_status(status & 0x23)
 
     def set_pll_error(self):
         self.failed = True
@@ -533,6 +535,7 @@ class DTMeasureCarrierFrequency(DTTask):
         return self
 
     def __eval_carrier_freq(self):
+        global hfAdcRange, adcCountRange
         if self.buffer is None or self.buffer0.size != self.buffer.size != self.parameters['datanum']:
             self.set_eval_error('Inconsistent data buffer size')
             return None
@@ -543,13 +546,13 @@ class DTMeasureCarrierFrequency(DTTask):
         bwin /= np.sqrt(sum(bwin**2)/N)
 
         # convert data to float64 and subtract DC component
-        It0 = self.buffer0.astype('float64')
+        It0 = self.buffer0 * (2 * hfAdcRange / adcCountRange)
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
         a0 = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It0))
 
         # convert data to float64 and subtract DC component
-        It = self.buffer.astype('float64')
+        It = self.buffer * (2 * hfAdcRange / adcCountRange)
         It -= np.mean(It)
         # FFT for PLL frequency with offset
         aoff = 2/N*np.abs(rfft(bwin*It))
@@ -628,6 +631,10 @@ class DTMeasureNonlinearity(DTTask):
             self.set_com_error(exc)
             return self
 
+        if min(self.buffer) == 0 or max(self.buffer) == adcCountRange-1:
+            self.set_eval_error('Сигнал вне диапазона АЦП' if dtg.LANG == 'ru' else 'Signal is out of ADC range')
+            return self
+
         res = self.__eval_inl()
         if res is None:
             self.set_eval_error()
@@ -640,6 +647,7 @@ class DTMeasureNonlinearity(DTTask):
         return self
 
     def __eval_inl(self):
+        global hfAdcRange, adcCountRange
         if self.buffer is None:
             return None
 
@@ -653,10 +661,10 @@ class DTMeasureNonlinearity(DTTask):
         bwin = blackman(N)
         bwin /= np.sqrt(sum(bwin**2)/N)
 
-        # convert data to float64 and subtract DC component
-        It = self.buffer[:N].astype('float64')  # take first half of the buffer as the I input
+        # convert data to Volts and subtract DC component
+        It = self.buffer[:N] * (2 * hfAdcRange / adcCountRange)  # take first half of the buffer as the I input
         It -= np.mean(It)
-        Qt = self.buffer[N:].astype('float64')  # take second half of the buffer as the Q input
+        Qt = self.buffer[N:] * (2 * hfAdcRange / adcCountRange)  # take second half of the buffer as the Q input
         Qt -= np.mean(Qt)
         # Compute FFT (non-negative frequencies only)
         If = 2/N*np.abs(rfft(bwin*It))
@@ -680,8 +688,7 @@ class DTDMRInput(DTTask):
     def __init__(self):
         super().__init__(('frequency',), ('BITERR',))
 
-        # 255 - dibit sequence length, 2 - number of repetitions, 25 - samples per symbol, 2 - I & Q channels
-        self.bufsize = 255*2*25*2
+        self.bufsize = 16384
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -690,7 +697,7 @@ class DTDMRInput(DTTask):
 
         self.foffset = 0
         try:
-            self.com.command('SET MEASST', 6)
+            self.com.command('SET MEASST', 1)
             isset, self.foffset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
@@ -710,13 +717,11 @@ class DTDMRInput(DTTask):
         if self.failed:
             return self
 
-        # bitnum = int(self.parameters['bitnum'])
-
         try:
             # read out the number of error bits
             # nerrbits = self.com.command('GET BITERR', bitnum, nreply=1)[0]
             # read out the ADC data for dibit sequence
-            self.buffer = self.com.command('GET DMRDIBIT', nreply=self.bufsize)
+            self.buffer = self.com.command('GET ADC DAT', (2, self.bufsize), nreply=self.bufsize)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -803,20 +808,19 @@ class DTMeasureSensitivity(DTTask):
     """
     name = dict(ru='Измерение чувствительности', en='Measuring sensitivity')
 
-    # Input ranges of ADS868x in volts (assumed bipolar) in the order of code
-    __adcVoltRange = (12.288, 10.240, 6.1440, 5.1200, 2.5600)
-
     __outSymbols = {-1: '<', 0: '', 1: '>', 2: '~'}
 
     def __init__(self):
         super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
-                         ('THRESHOLD POWER', 'STATUS'))
+                         ('THRESHOLD POWER', 'FFT', 'STATUS'))
         self.buffer = None
 
     def load_cal(self):
         """ Loading calibration of output power. Called from the main process where dtParameterDesc is kept up to date.
         """
-        global dtParameterDesc
+        global DEBUG, dtParameterDesc
+        if DEBUG:
+            print('DTMeasureSensitivity.load_cal(): calibration is loaded')
         for par in ('refatt', 'refoutpower'):
             self.parameters[par] = dtParameterDesc[par]['default']
 
@@ -871,7 +875,7 @@ class DTMeasureSensitivity(DTTask):
             return self
 
         if attcode != attrange[0]:
-            # do last measurement if INL
+            # do last measurement of INL
             attcode = attrange[0]
             lastinlcomp = self.__measure_inl_for_att(attcode)
 
@@ -894,50 +898,67 @@ class DTMeasureSensitivity(DTTask):
         return self
 
     def check_result(self, res):
-        if isinstance(self.task, self.__class__) and\
-           res == 'THRESHOLD POWER' and 'STATUS' in self.results:
+        if res == 'THRESHOLD POWER' and 'STATUS' in self.results:
             status = self.results['STATUS']
-            return (status==0, self.__outSymbols[status])
+            return (status == 0, self.__outSymbols[status], None)
         else:
-            return (True, '')
+            return (True, None, None)
 
+    def __scan_adc_range(self, limit, keepin, tsize=256):
+        """Scan ADC range until readings are in the given limit"""
+        global lfAdcVoltRanges
+        maxamp = adcCountRange - 1
+        l, u = (1-limit)/2, (1+limit)/2
+        rscan = range(len(lfAdcVoltRanges)-1, -1, -1) if keepin else range(len(lfAdcVoltRanges))
+
+        met = False
+        for r in rscan:
+            self.com.command("SET LF RANGE", r)
+            buf = self.com.command('GET ADC DAT', [3, tsize], nreply=tsize)[1:]  # drop the first word
+            amin, amax = buf.min(), buf.max()
+            if keepin and (amax/maxamp <= u and amin/maxamp >= l) or\
+               not keepin and (amax/maxamp > u or amin/maxamp < l):
+                met = True
+                break
+
+        self.adcrange = r
+
+        lastRelAmp = 1 - 2*min(1-amax/maxamp, amin/maxamp)
+
+        return met, lastRelAmp
 
     def __measure_inl_for_att(self, attcode: int):
-        ampuplim = 0xFFFF
+        global DEBUG, lfAdcVoltRanges
+
         bsize = int(self.parameters['datanum'])
-        tsize = 1024
 
         self.com.command("SET ATT", attcode)
-        self.com.command("SET LF RANGE", self.adcrange)
+
+        if DEBUG:
+            print(f'DTMeasureSensitivity: ATT = {attcode/2:.1f} dB')
 
         # find appropriate LF ADC range
-        buf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
-        amax = max(abs(buf.max()), abs(buf.min()))
-        tryrange = self.adcrange
-        if amax/ampuplim < 0.7:
-            while tryrange < 4 and amax/ampuplim*self.__adcVoltRange[self.adcrange]/self.__adcVoltRange[tryrange+1] < 0.9:
-                tryrange += 1
-            if tryrange != self.adcrange:
-                self.com.command("SET LF RANGE", tryrange)
-        elif amax/ampuplim > 0.9:
-            while tryrange > 0:
-                # update ADC data in case of saturation
-                tryrange -= 1
-                self.com.command("SET LF RANGE", tryrange)
-                buf = np.array(self.com.command('GET ADC DAT', [3, tsize], nreply=tsize))
-                amax = max(abs(buf.max()), abs(buf.min()))
-                if amax/ampuplim <= 0.9:
-                    break
-        self.adcrange = tryrange
+        _, lastRelAmp = self.__scan_adc_range(0.7, False)  # try to narrow the range
+        if DEBUG:
+            print(f'DTMeasureSensitivity: Rel. amplitude spread {lastRelAmp:.3f} for ADC range ±{lfAdcVoltRanges[self.adcrange]}V')
 
-        if amax/ampuplim > 0.9:
-            self.set_eval_error(f'Перегузка НЧ АЦП для диапазона {self.__adcVoltRange[tryrange]}В'
-                                if dtg.LANG == 'ru' else f'LF ADC overload for range {self.__adcVoltRange[tryrange]}V')
-            return False
+        if lastRelAmp > 0.9:
+            met, lastRelAmp = self.__scan_adc_range(0.9, True)  # widen the range
+
+            if not met:
+                self.set_eval_error(f'Перегузка НЧ АЦП для диапазона ±{lfAdcVoltRanges[self.adcrange]}В'
+                                    if dtg.LANG == 'ru' else
+                                    f'LF ADC overload for range ±{lfAdcVoltRanges[self.adcrange]}V')
+                return False
+
+        if DEBUG:
+            print(f'DTMeasureSensitivity: Set ADC range ±{lfAdcVoltRanges[self.adcrange]}')
 
         self.buffer = self.com.command('GET ADC DAT', [3, bsize], nreply=bsize)
 
         inl = self.__eval_inl()
+        if DEBUG:
+            print(f'DTMeasureSensitivity: INL = {inl/100:.2f} %')
         if inl is None:
             self.set_eval_error('КНИ не определен' if dtg.LANG == 'ru' else 'INL is not defined')
             return False
@@ -948,6 +969,7 @@ class DTMeasureSensitivity(DTTask):
         return False
 
     def __eval_inl(self):
+        global adcCountRange, lfAdcVoltRanges
         if self.buffer is None:
             return None
 
@@ -955,8 +977,8 @@ class DTMeasureSensitivity(DTTask):
         bwin = blackman(N)
         bwin /= np.sqrt(sum(bwin**2)/N)
 
-        # convert data to float64 and subtract DC component
-        It = self.buffer.astype('float64')
+        # convert data to Volts and subtract DC component
+        It = self.buffer * (lfAdcVoltRanges[self.adcrange] / adcCountRange)
         It -= np.mean(It)
 
         # Compute FFT (non-negative frequencies only)
@@ -975,10 +997,9 @@ class DTDMRInputModel(DTTask):
     name = dict(ru='Вход ЦР (модель)', en='DMR Input (model)')
 
     refFreq = DTDMRInput.refFreq
-    adcCountRange = 1<<15-1  # unipolar
 
     def __init__(self):
-        super().__init__(('frequency','noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
+        super().__init__(('frequency', 'noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
         homedir = getenv('HOME')
         ifilename, qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
         self.bufsize = 255*2*25*2
@@ -987,7 +1008,7 @@ class DTDMRInputModel(DTTask):
             self.ibuffer = np.genfromtxt(ifilename, dtype='int32', delimiter='\n')
             self.qbuffer = np.genfromtxt(qfilename, dtype='int32', delimiter='\n')
             print(f'DTDMRInputModel: Data loaded with length of {self.ibuffer.size}')
-        except Exception as exc:
+        except Exception:
             print_exc()
 
     def init_meas(self, **kwargs):
@@ -1044,13 +1065,13 @@ class DTDMRInputModel(DTTask):
             It = self.buffer[:self.bufsize//2]
             Qt = self.buffer[self.bufsize//2:]
 
-        ampNoise = self.parameters['noise']*self.adcCountRange
-        ampMax = self.adcCountRange
+        ampNoise = self.parameters['noise']*adcCountRange/2
+        ampMax = adcCountRange//2 - 1
         # subtract the DC component for real data
-        It = np.clip(np.around(It-np.mean(It)).astype('int32') +\
-             (ampNoise*self.rng.normal(size=It.size)).astype('int32'), -ampMax, ampMax)
-        Qt = np.clip(np.around(Qt-np.mean(Qt)).astype('int32') +\
-             (ampNoise*self.rng.normal(size=Qt.size)).astype('int32'), -ampMax, ampMax)
+        It = np.clip(np.around(It-np.mean(It)).astype('int32') +
+                     (ampNoise*self.rng.normal(size=It.size)).astype('int32'), -ampMax, ampMax)
+        Qt = np.clip(np.around(Qt-np.mean(Qt)).astype('int32') +
+                     (ampNoise*self.rng.normal(size=Qt.size)).astype('int32'), -ampMax, ampMax)
 
         # find the bit error rate and constant symbol intervals
         maxlen = 20*200  # max length of returned Iref, Qref
@@ -1149,7 +1170,7 @@ class DTScenario:
             for t in d['tasks']:
                 scen.addTask(dtTaskTypeDict['cls'][t['class']], t['parameters'])
         except KeyError:
-            del scen
+            scen = None
             raise DTInternalError('DTScenario.fromDict()', 'Wrong dict format')
         return scen
 

@@ -1,13 +1,12 @@
-from dtexcept import DTInternalError
 from time import time
-
-from numpy.lib.arraysetops import isin
-import tasks
-from tasks import DTTask, DTCalibrate
-from dtcom import DTSerialCom
 from multiprocessing import Process
 from multiprocessing.connection import Connection
 from io import FileIO
+from traceback import print_exc
+
+import tasks
+from tasks import DTTask, DTCalibrate
+from dtcom import DTSerialCom
 
 
 class DTProcess(Process):
@@ -32,7 +31,6 @@ class DTProcess(Process):
 
     def run(self):
         """ Run loop and waiting for submitted tasks """
-        print(f'DTProcess: Process {self.pid} started')
 
         # Calibration after the start
         self.calibrate()
@@ -86,6 +84,7 @@ class DTProcess(Process):
                         msg = self.conn.recv()
 
         except Exception as exc:
+            print_exc()
             self.conn.send(exc)
         finally:
             self.conn.send(f'stopped {task.id}')

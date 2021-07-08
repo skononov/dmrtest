@@ -1,3 +1,4 @@
+from traceback import format_exception_only
 import serial
 import os
 import time
@@ -132,7 +133,7 @@ class DTSerialCom(metaclass=Singleton):
             self.port.reset_input_buffer()
             self.port.reset_output_buffer()
         except Exception as exc:
-            print(source+':', exc, '. Try to reopen device.')
+            print(source+':', format_exception_only(exc), '\nTrying to reopen device...')
             self.__init__(self.timeout)
 
         try:
@@ -160,7 +161,11 @@ class DTSerialCom(metaclass=Singleton):
             raise DTComError('Read from serial port failed') from exc
 
         if DEBUG:
-            print(f'{source}: received: {response}')
+            nr = len(response)
+            nhead = min(nr, 100)
+            ntail = min(5, max(0, nr-100))
+            cutresp = response[:nhead] + (b"..." if ntail > 0 else b"") + (response[-ntail:] if ntail > 0 else b"")
+            print(f'{source}: received: {cutresp}')
 
         if response == b'':
             raise DTComError(f'On {command}: Empty answer or timeout {self.port.timeout}s expired.')
@@ -193,7 +198,7 @@ class DTSerialCom(metaclass=Singleton):
         rdata = frombuffer(response[2:], dtype=uint16, count=length)
 
         if DEBUG:
-            print(f'{source}: read {rdata} words: {rdata}')
+            print(f'{source}: read {rdata.size} words: {rdata}')
 
         return rdata
 

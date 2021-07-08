@@ -1,10 +1,10 @@
 from numbers import Integral
-from os import access, R_OK, getpid, getenv
+from os import access, R_OK, getpid, getenv, pread, setpriority, PRIO_PROCESS
 from time import asctime
-from traceback import print_exc, format_exc, format_exception_only
+from traceback import print_exc, format_exception_only
 from io import FileIO
 import numpy as np
-from numpy.lib.function_base import copy
+from numpy.lib.twodim_base import _trilu_indices_form_dispatcher
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -16,9 +16,9 @@ from multiprocessing import Pipe
 
 from process import DTProcess
 from config import DTConfiguration
-from tasks import DTScenario, DTTask, dtTaskInit, dtParameterDesc, dtResultDesc
+from tasks import DTScenario, DTTask, dtTaskInit, dtResultDesc
 from singleton import Singleton
-from dtexcept import DTComError, DTUIError
+from dtexcept import DTUIError
 import tasks
 import dtglobals as dtg
 from dtglobals import __appname__, __version__
@@ -33,7 +33,8 @@ LIGHTER_BG_COLOR = '#4E4E4E'
 HIGHLIGHT_COLOR = '#3C449D'
 SELECT_BG_COLOR = '#274F77'
 BUTTON_BG_COLOR = '#505050'
-DEFAULT_FG_COLOR = '#EEEEEE'
+DEFAULT_FG_COLOR = '#F0F0F0'
+DIMMED_FG_COLOR = '#CCCCCC'
 
 DEFAULT_FONT_FAMILY = "Helvetica"
 MONOSPACE_FONT_FAMILY = "lucidasanstypewriter"
@@ -55,13 +56,19 @@ class DTApplication(tk.Tk, metaclass=Singleton):
     """
     DEBUG = False
 
-    __dtTkOptionFilename = '~/.dtstyle'
+    __tkOptionFilename = getenv('HOME') + '/dmr/dmrtest.tkstyle'
+    __tkPidFilename = getenv('HOME') + '/dmr/dmrtest.pid'
 
     def __init__(self):
         global _scrollEntry
+        super().__init__()
+
         print(f'DTApplication created in the procees PID {getpid()}')
 
-        super().__init__()
+        # write pid of the main process to file
+        with open(self.__tkPidFilename, 'w') as f:
+            f.write(str(getpid()) + '\n')
+
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         if sw/sh > 2:
             sw //= 2
@@ -92,8 +99,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.__startTaskProcessWithChecking()
 
         # set styles
-        if access(DTApplication.__dtTkOptionFilename, R_OK):
-            self.readStyle(DTApplication.__dtTkOptionFilename)
+        if access(DTApplication.__tkOptionFilename, R_OK):
+            self.readStyle(DTApplication.__tkOptionFilename)
         else:
             self.defaultStyle()
 
@@ -130,6 +137,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*Spinbox.highlightThickness', '2')
         self.option_add('*Listbox.highlightThickness', '2')
         self.option_add('*Entry.background', DARK_BG_COLOR)
+        self.option_add('*Entry.disabledBackground', DEFAULT_BG_COLOR)
+        self.option_add('*Entry.disabledForeground', DIMMED_FG_COLOR)
         self.option_add('*Spinbox.background', DARK_BG_COLOR)
         self.option_add('*Listbox.background', DARK_BG_COLOR)
         self.option_add('*Button.background', BUTTON_BG_COLOR)
@@ -142,7 +151,7 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 
         # take some Tkinter colors for Matplotlib canvas
         plt.style.use('dark_background')
-        mpl.rcParams["font.size"] = int(SMALL_FONT_SIZE)
+        mpl.rcParams['font.size'] = int(SMALL_FONT_SIZE)
         mpl.rcParams['axes.titlesize'] = int(SMALL_FONT_SIZE)
         mpl.rcParams['axes.labelsize'] = int(SMALL_FONT_SIZE)
         mpl.rcParams['xtick.labelsize'] = mpl.rcParams['ytick.labelsize'] = int(LITTLE_FONT_SIZE)
@@ -150,7 +159,6 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         mpl.rcParams['figure.facecolor'] = self.option_get('activeBackground', 'DTApplication')
         mpl.rcParams['figure.edgecolor'] = self.option_get('background', 'DTApplication')
         mpl.rcParams['lines.markersize'] = 4
-        #mpl.rcParams["figure.dpi"] = 120
         mpl.rcParams["lines.linewidth"] = 1.5
         mpl.rcParams["grid.linewidth"] = 0.5
         mpl.rcParams["axes.linewidth"] = 1.0
@@ -183,6 +191,11 @@ class DTApplication(tk.Tk, metaclass=Singleton):
             del self.taskProcess
         self.taskProcess = DTProcess(self.childTaskConn)
         self.taskProcess.start()
+        print(f'DTProcess spawned with pid {self.taskProcess.pid}')
+        # write pid of the task process to file
+        with open(self.__tkPidFilename, 'a') as f:
+            f.write(str(self.taskProcess.pid) + '\n')
+        # setpriority(PRIO_PROCESS, self.taskProcess.pid, -20)
 
     def __startTaskProcessWithChecking(self):
         if not hasattr(self, 'taskProcess') or not self.taskProcess.is_alive():
@@ -284,15 +297,15 @@ class DTPlotFrame(tk.Frame):
         frame.columnconfigure(3, weight=1)
         frame.columnconfigure(7, weight=1)
 
-        self.timeSpan = tk.IntVar()
-        self.timeSpan.set(20)
-        self.freqSpan = tk.IntVar()
-        self.freqSpan.set(dtg.adcSampleFrequency//2)
+        self.timeSpanVar = tk.IntVar()
+        self.timeSpanVar.set(20)
+        self.freqSpanVar = tk.IntVar()
+        self.freqSpanVar.set(dtg.adcSampleFrequency//2)
 
         tk.Label(frame, text='\u2206 T')\
             .grid(row=0, column=0, sticky=tk.E, padx=5)
-        self.timeBox = tbox = tk.Spinbox(frame, textvariable=self.timeSpan, width=5)
-        tbox.configure(from_=1, to=100, increment=1, justify=tk.RIGHT,
+        tbox = tk.Spinbox(frame, textvariable=self.timeSpanVar, width=5)
+        tbox.configure(from_=1, to=600, increment=1, justify=tk.RIGHT,
                        font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE), format='%5.0f')
         tbox.grid(row=0, column=1)
         tk.Label(frame, text=('с' if dtg.LANG == 'ru' else 's'))\
@@ -300,8 +313,8 @@ class DTPlotFrame(tk.Frame):
 
         tk.Label(frame, text='\u2206 f')\
             .grid(row=0, column=4, sticky=tk.E, padx=5)
-        self.freqBox = fbox = tk.Spinbox(frame, textvariable=self.freqSpan, width=6)
-        fbox.configure(from_=10, to=dtg.adcSampleFrequency//2, increment=10,
+        fbox = tk.Spinbox(frame, textvariable=self.freqSpanVar, width=6)
+        fbox.configure(from_=100, to=dtg.adcSampleFrequency//2, increment=100,
                        font=(MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE), justify=tk.RIGHT, format='%6.0f')
         fbox.grid(row=0, column=5)
         tk.Label(frame, text=('Гц' if dtg.LANG == 'ru' else 'Hz'))\
@@ -312,9 +325,16 @@ class DTPlotFrame(tk.Frame):
         styles = ('   .', '  -.', '   o', '  -o', '   ,')
         self.styleVar = tk.StringVar()
         self.styleVar.set(styles[0])
+        self.prevStyle = self.styleVar.get()
         menu = tk.OptionMenu(frame, self.styleVar, *styles)
         menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE})
         menu.grid(row=0, column=9, sticky=tk.W)
+
+        self.controlVars = dict()
+        for widget, var in ((tbox, self.timeSpanVar), (fbox, self.freqSpanVar), (menu, self.styleVar)):
+            widget.bind('<FocusOut>', self.__changeControlHandler)
+            widget.bind('<Key-Return>', self.__changeControlHandler)
+            self.controlVars[id(widget)] = [var, var.get()]
 
     def __createCanvas(self):
         self.canvasFrame = frame = tk.Frame(self, padx=0, pady=0)
@@ -329,7 +349,18 @@ class DTPlotFrame(tk.Frame):
         self.updateFigSize = True
 
     def getTimeSpan(self):
-        return self.timeSpan.get()
+        return self.timeSpanVar.get()
+
+    def __calcXlim(self, x, istime: bool):
+        first = x[0] if x.size > 0 else 0
+        last = x[-1] if x.size > 0 else 1
+        if istime:
+            xmax = max(int(last+1), int(first) + self.timeSpanVar.get())
+            xmin = max(int(first), xmax-self.timeSpanVar.get())
+        else:
+            xmax = min(last+1, self.freqSpanVar.get())
+            xmin = 0
+        return xmin, xmax
 
     def plotGraphs(self, results: dict):
         """Plot all marked results. Create new subplots for the first time and
@@ -344,20 +375,9 @@ class DTPlotFrame(tk.Frame):
             self.figure.set_size_inches(0.93*w/dpi, h/dpi)  # real dpi differs?
             self.updateFigSize = False
 
-        def calc_xlim(x, istime: bool):
-            first = x[0] if x.size > 0 else 0
-            last = x[-1] if x.size > 0 else 1
-            if istime:
-                xmax = max(int(last+1), int(first) + self.timeSpan.get())
-                xmin = max(int(first), xmax-self.timeSpan.get())
-            else:
-                xmax = min(last+1, self.freqSpan.get())
-                xmin = 0
-            return xmin, xmax
-
         if not hasattr(self, 'pkeys'):
             self.pkeys = None
-        ckeys = tuple([k for k, r in results.items() if r['draw'] and r['n'] > 0])
+        ckeys = dict([(k, r['type']) for k, r in results.items() if r['draw'] and r['n'] > 0])
         nres = len(ckeys)
         if nres == 0:
             self.clearCanvas()
@@ -366,16 +386,16 @@ class DTPlotFrame(tk.Frame):
             # plot new
             self.pkeys = ckeys
             self.figure.clf()
-            types = list(set([results[k]['type'] for k in ckeys]))
+            types = list(set([typ for k, typ in ckeys.items()]))  # unique type list
             ntypes = len(types)
             self.figure.subplots(nres, 1, sharex=(ntypes == 1), subplot_kw=dict(autoscale_on=True))
             axes = self.figure.axes
-            for i, (ax, key) in enumerate(zip(axes, ckeys)):
+            for i, (ax, key, typ) in enumerate(zip(axes, ckeys.keys(), ckeys.values())):
                 result = results[key]
                 n = result['n']
                 color = f'C{i%self.ncolors}'  # cycle colors
                 xlabel = ''
-                if result['type'] == 'time':
+                if typ == 'time':
                     x = result['x'][:n]
                     y = result['y'][:n]
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
@@ -395,7 +415,7 @@ class DTPlotFrame(tk.Frame):
                 ax.lines[0].set_ls(ls)
                 ax.lines[0].set_marker(m)
                 ax.set_title(title)
-                ax.set_xlim(*calc_xlim(x, result['type'] == 'time'))
+                ax.set_xlim(*self.__calcXlim(x, result['type'] == 'time'))
                 ax.relim(True)
                 ax.autoscale_view(tight=False)
                 ax.grid(self.gridOn, 'major')
@@ -403,25 +423,61 @@ class DTPlotFrame(tk.Frame):
             # update plots
             axes = self.figure.axes
             assert(len(axes) == nres)
-            for ax, key in zip(axes, ckeys):
+            for ax, (key, typ) in zip(axes, ckeys.items()):
                 result = results[key]
                 n = result['n']
-                if result['type'] == 'time':
+                if typ == 'time':
                     x = result['x'][:n]
                     y = result['y'][:n]
                 else:
                     x = result['x']
                     y = result['y']
-                ax.lines[0].set_data(x, y)
+                line2d = ax.lines[0]
+                line2d.set_data(x, y)
                 ls, m = [('' if c == ' ' else c) for c in self.styleVar.get()[2:]]
-                ax.lines[0].set_ls(ls)
-                ax.lines[0].set_marker(m)
-                ax.set_xlim(*calc_xlim(x, result['type'] == 'time'))
+                line2d.set_ls(ls)
+                line2d.set_marker(m)
+                ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
                 ax.relim(True)
                 ax.autoscale_view(tight=False)
 
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
+
+    def __updateAxes(self):
+        if self.figure is None:
+            return
+        axes = self.figure.axes
+        if len(axes) == 0:
+            return
+        for ax, (key, typ) in zip(axes, self.pkeys.items()):
+            ls, m = [('' if c == ' ' else c) for c in self.styleVar.get()[2:]]
+            if len(ax.lines) == 0:
+                continue
+            line2d = ax.lines[0]
+            x = line2d.get_xdata()
+            line2d.set_ls(ls)
+            line2d.set_marker(m)
+            ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
+            ax.relim(True)
+            ax.autoscale_view(tight=False)
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
+        self.updateScheduled = False
+
+    def __changeControlHandler(self, event: tk.Event):
+        w: tk.Widget = event.widget
+        for wid, (var, prev) in self.controlVars.items():
+            if wid == id(w):
+                try:
+                    var.set(np.clip(var.get(), w['from_'], w['to']))
+                except tk.TclError:
+                    pass
+            if var.get() != prev:
+                prev = var.get()
+                if not hasattr(self, 'updateScheduled') or not self.updateScheduled:
+                    self.updateScheduled = True
+                    self.after(500, self.__updateAxes())
 
     def clearCanvas(self):
         self.figure.clf()
@@ -681,7 +737,7 @@ class DTNewScenarioDialog(tk.Toplevel):
 class DTTaskFrame(tk.Frame):
     """ A frame rendered in the root window to manage task execution
     """
-    def __init__(self, master=None, task: DTTask=None, state=None):
+    def __init__(self, master=None, task: DTTask = None, state=None):
         """ Constructor for a task front-end.
             task - DTTask object to be managed
             state - can have values: None, 'first' (first in scenario), 'last' (last in scenario), 'midthrough'.
@@ -704,7 +760,7 @@ class DTTaskFrame(tk.Frame):
 
         self.__createWidgets()
 
-        #self.after(100, self.__runTask)  # start running immediately
+        # self.after(100, self.__runTask)  # start running immediately
 
     def __createWidgets(self):
         """Build all widgets"""
@@ -721,12 +777,10 @@ class DTTaskFrame(tk.Frame):
             .grid(row=0, column=0, columnspan=2, pady=5, sticky=tk.W+tk.E+tk.N)
 
         self.leftFrame = tk.Frame(self, padx=5, pady=5)
-        self.leftFrame.columnconfigure(0, weight=1, minsize=self.lw-10)
         self.leftFrame.rowconfigure(1, weight=1)
         self.leftFrame.grid(row=1, column=0, sticky=tk.N+tk.S+tk.W+tk.E)
 
         self.rightFrame = tk.Frame(self, padx=5, pady=5)
-        self.rightFrame.columnconfigure(0, weight=1)
         self.rightFrame.rowconfigure(2, weight=1)
         self.rightFrame.grid(row=1, column=1, sticky=tk.N+tk.S+tk.W+tk.E)
 
@@ -785,20 +839,18 @@ class DTTaskFrame(tk.Frame):
             self.parvars[par] = parvar
 
             if preadonly:
-                entry = tk.Label(paramFrame, textvariable=parvar)
-                entry.configure(width=10, font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE),
-                                justify=tk.RIGHT, relief=tk.SUNKEN)
+                entry = tk.Entry(paramFrame, textvariable=parvar)
+                entry.configure(width=11, justify=tk.RIGHT, state=tk.DISABLED)
             else:
                 self.parentries[par] = entry = tk.Spinbox(paramFrame, textvariable=parvar)
                 entry.configure(width=10, from_=plowlim, to=puplim, justify=tk.RIGHT, format='%'+pformat,
-                                validate='key', validatecommand=(validateCall, '%W', '%P'),
-                                bg=self.option_get('background', 'Spinbox'))
+                                validate='key', validatecommand=(validateCall, '%W', '%P'))
                 if pavalues is not None:
                     entry.configure(values=pavalues)
                 else:  # use increment
                     entry.configure(increment=pincr)
 
-            entry.grid(row=irow, column=1, sticky=tk.W, padx=5)
+            entry.grid(row=irow, column=1, sticky=tk.W, padx=3)
 
             tk.Label(paramFrame, text=punit).grid(row=irow, column=2, sticky=tk.W)
 
@@ -819,10 +871,10 @@ class DTTaskFrame(tk.Frame):
             self.actplotimgs = [None]*len(mplcolors)
             # self.actplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/plot.gif')
             # self.inactplotimg = tk.PhotoImage(file=DTApplication().imgdir + '/grayplot.gif')
-            self.actplotimg = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm', 
+            self.actplotimg = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm',
                                              background='white')
             for i, c in enumerate(mplcolors):
-                self.actplotimgs[i] = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm', 
+                self.actplotimgs[i] = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm',
                                                      background=c['color'])
                 self.inactplotimg = tk.BitmapImage(file=DTApplication().imgdir + '/plot.xbm',
                                                    background=self.option_get('activeBackground', 'Checkbutton'))
@@ -837,38 +889,40 @@ class DTTaskFrame(tk.Frame):
         for i in range(self.maxResPerCol):
             resultFrame.rowconfigure(i, pad=10)
 
-        for i in range(len(self.task.results)//self.maxResPerCol+1):
-            resultFrame.columnconfigure(4*i, weight=1)
-            resultFrame.columnconfigure(4*i+3, weight=1)
+        resultFrame.columnconfigure(0, weight=1)
+        resultFrame.columnconfigure(4, weight=1)
 
-        irow = icol = 0
-        for i, res in enumerate(self.task.results):
+        i = 0
+        for res in self.task.results:
+            if res not in dtResultDesc:
+                continue
+
             irow = i % self.maxResPerCol
             icol = 4 * (i // self.maxResPerCol)
+            i += 1
 
-            if res in dtResultDesc:
-                name = dtResultDesc[res][dtg.LANG]
-                unitname = dtg.units[dtResultDesc[res]['dunit']][dtg.LANG]
+            resdata = dtResultDesc[res]
+            name = resdata[dtg.LANG]
+
+            if resdata['format'] != '':
+                unitname = dtg.units[resdata['dunit']][dtg.LANG]
 
                 valframe = tk.Frame(resultFrame, relief=tk.SUNKEN, bd=2,
                                     bg=self.option_get('background', 'Entry'), padx=4, pady=2)
                 valframe.columnconfigure(0, minsize=135)
-                valframe.grid(row=irow, column=icol+1, sticky=tk.W+tk.E)
+                valframe.grid(row=irow, column=icol+1, sticky=tk.W+tk.E, padx=3)
                 self.reslabels[res] = reslabel = tk.Label(valframe, text='----',
                                                           font=(MONOSPACE_FONT_FAMILY, BIG_FONT_SIZE))
                 reslabel.grid(sticky=tk.E)
 
                 tk.Label(resultFrame, text=unitname, justify=tk.LEFT).grid(row=irow, column=icol+2, sticky=tk.W)
-            else:
-                name = res
 
             tk.Label(resultFrame, text=name+':', justify=tk.RIGHT).grid(row=irow, column=icol, sticky=tk.E)
 
             self.plotvars[res] = tk.IntVar()
 
             cb = self.plotcbs[res] = tk.Checkbutton(resultFrame, command=self.__checkPlots)
-            cb.configure(indicatoron=0, variable=self.plotvars[res],
-                         padx=3, pady=3)
+            cb.configure(indicatoron=0, variable=self.plotvars[res], padx=3, pady=3)
             if self.actplotimg:
                 cb.configure(image=self.inactplotimg, selectimage=self.actplotimg)
             else:
@@ -1005,9 +1059,14 @@ class DTTaskFrame(tk.Frame):
         for res in self.plotcbs:
             cb: tk.Checkbutton = self.plotcbs[res]
             # Prepare for plotting results
-            self.presults[res]['draw'] = draw = self.plotvars[res].get() != 0
+            presult = self.presults[res]
+            presult['draw'] = draw = self.plotvars[res].get() != 0
             if draw:
                 cb.configure(selectimage=next(actImgIter), foreground=next(colorIter)['color'])
+                if presult['draw'] and presult['type'] == 'freq':
+                    presult['y'] = y = self.task.results[res]
+                    presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
+                    presult['n'] = y.size
         self.plotFrame.plotGraphs(self.presults)
 
     def __resetResHist(self):

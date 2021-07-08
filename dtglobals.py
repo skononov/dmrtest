@@ -13,6 +13,14 @@ LANG = 'ru'  # or 'en'
 adcSampleFrequency: int = 120000  # Hz
 symbolDevFrequency: int = 648  # Hz
 
+# Input range of MAX11198 ADC in volts (assumed bipolar)
+hfAdcRange = 2.5
+
+# Input ranges of ADS868x ADC in volts (assumed bipolar) in the order of code
+lfAdcVoltRanges = (12.288, 10.240, 6.1440, 5.1200, 2.5600)
+
+adcCountRange = (1 << 16)  # full count range both for LF and HF ADCs (max. value is adcCountRange-1)
+
 units = {
     'Hz': dict(multiple=Hz, quantity='frequency', ru='Гц', en='Hz'),
     'kHz': dict(multiple=kHz, quantity='frequency', ru='кГц', en='kHz'),
@@ -26,11 +34,12 @@ units = {
     'dBm': dict(multiple=1, quantity='logpower', ru='дБм', en='dBm'),
     '%': dict(multiple=0.01, quantity='fraction', ru='%', en='%'),
     'ppm': dict(multiple=1e-6, quantity='fraction', ru='ppm', en='ppm'),
-    '1': dict(multiple=1, quantity='dimensionless', ru='', en='')
+    '1': dict(multiple=1, quantity='dimensionless', ru='', en=''),
+    'none': dict(multiple=1, quantity='none', ru='', en='')
     }
 
 appInfo = dict(
-    ru = f"""
+    ru=f"""
         {__appname__} {__version__}
         Тест цифрового передвижного радио от "ИТЦ Контур"
 
@@ -42,8 +51,8 @@ appInfo = dict(
             Esc - выход из текущего окна или меню
             Колесо мыши - прокрутка значений параметров
         """,
-    en = f"""
-        {__appname__} {__version__} 
+    en=f"""
+        {__appname__} {__version__}
         Test of Digital Mobile Radio by "ITC Kontur"
 
         Use mouse or keyboard for control.
