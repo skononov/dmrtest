@@ -69,7 +69,8 @@ dtResultDesc = {
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
     'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
     'THRESHOLD POWER': {'ru': 'Порог P', 'en': 'Thr. P', 'dunit': 'dBm', 'format': '5.1f'},
-    'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'none', 'format': ''}
+    'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'none', 'format': ''},
+    'ADC': {'ru': 'Осциллограмма', 'en': 'Waveform', 'dunit': 'none', 'format': ''}
 }
 
 
@@ -807,7 +808,6 @@ class DTDMROutput(DTTask):
             self.set_com_error(exc)
             return self
 
-
         self.results['OUTPOWER'] = self.parameters['refoutpower'] + self.parameters['refatt'] - self.parameters['att']
 
         self.set_success()
@@ -825,7 +825,7 @@ class DTMeasureSensitivity(DTTask):
 
     def __init__(self):
         super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
-                         ('THRESHOLD POWER', 'FFT', 'STATUS'))
+                         ('THRESHOLD POWER', 'FFT', 'ADC', 'STATUS'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -944,7 +944,8 @@ class DTMeasureSensitivity(DTTask):
         # find appropriate LF ADC range
         _, lastRelAmp = self.__scan_adc_range(0.7, False)  # try to narrow the range
         if DEBUG:
-            print(f'DTMeasureSensitivity: Rel. amplitude spread {lastRelAmp:.3f} for ADC range ±{lfAdcVoltRanges[self.adcrange]}V')
+            print(f'DTMeasureSensitivity: Rel. amplitude spread {lastRelAmp:.3f}' +\
+                  f' for ADC range ±{lfAdcVoltRanges[self.adcrange]}V')
 
         if lastRelAmp > 0.9:
             met, lastRelAmp = self.__scan_adc_range(0.9, True)  # widen the range
@@ -984,6 +985,8 @@ class DTMeasureSensitivity(DTTask):
         # convert data to Volts and subtract DC component
         It = self.buffer * (lfAdcVoltRanges[self.adcrange] / adcCountRange)
         It -= np.mean(It)
+
+        self.results['ADC'] = It
 
         # Compute FFT (non-negative frequencies only)
         af = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It))
