@@ -4,6 +4,7 @@ from time import asctime
 from traceback import print_exc, format_exception_only
 from io import FileIO
 import numpy as np
+from numpy.core.function_base import linspace
 from numpy.lib.twodim_base import _trilu_indices_form_dispatcher
 from scipy.fft import rfftfreq
 import matplotlib as mpl
@@ -167,7 +168,7 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         mpl.rcParams["figure.constrained_layout.h_pad"] = 0.06
         mpl.rcParams["figure.constrained_layout.w_pad"] = 0.1
         mpl.rcParams["figure.constrained_layout.hspace"] = 0.02
-        mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
+        #mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
 
     def run(self):
         """Start GUI event loop
@@ -300,8 +301,10 @@ class DTPlotFrame(tk.Frame):
 
         self.timeSpanVar = tk.StringVar()
         self.timeSpanVar.set('20')
+        self.prevTimeSpan = self.timeSpanVar.get()
         self.freqSpanVar = tk.StringVar()
         self.freqSpanVar.set(f'{dtg.adcSampleFrequency//2}')
+        self.freqTimeSpan = self.freqSpanVar.get()
 
         tk.Label(frame, text='\u2206 T')\
             .grid(row=0, column=0, sticky=tk.E, padx=5)
@@ -323,26 +326,13 @@ class DTPlotFrame(tk.Frame):
 
         tk.Label(frame, text=('Стиль' if dtg.LANG == 'ru' else 'Style'))\
             .grid(row=0, column=8, sticky=tk.E, padx=5)
-        styles = ('   .', '  -.', '   o', '  -o', '   ,')
+        styles = ('  - ', '   .', '  -.', '   o', '  -o', '   ,')
         self.styleVar = tk.StringVar()
         self.styleVar.set(styles[0])
         self.prevStyle = self.styleVar.get()
         menu = tk.OptionMenu(frame, self.styleVar, *styles)
         menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE})
         menu.grid(row=0, column=9, sticky=tk.W)
-
-        self.controlVars = dict()
-        for widget, var in ((tbox, self.timeSpanVar), (fbox, self.freqSpanVar), (menu, self.styleVar)):
-            """
-            if widget == menu:
-                widget.bind('<ButtonRelease-1>', self.__changeControlHandler)
-            else:
-                widget.bind('<Button-4>', self.__changeControlHandler)
-                widget.bind('<Button-5>', self.__changeControlHandler)
-                widget.bind('<FocusOut>', self.__changeControlHandler)
-                widget.bind('<Key-Return>', self.__changeControlHandler)
-            """
-            self.controlVars[id(widget)] = [var, var.get()]
 
     def __createCanvas(self):
         self.canvasFrame = frame = tk.Frame(self, padx=0, pady=0)
@@ -351,27 +341,129 @@ class DTPlotFrame(tk.Frame):
         self.ncolors = len(mpl.rcParams["axes.prop_cycle"])
         canvas = FigureCanvasTkAgg(self.figure, master=frame)
         canvas.draw()
+        canvas.mpl_connect('scroll_event', self.__scrollAxesHandler)
+        canvas.mpl_connect('button_press_event', self.__buttonPressHandler)
+        canvas.mpl_connect('motion_notify_event', self.__mouseMoveHandler)
+        canvas.mpl_connect('button_release_event', self.__buttonReleaseHandler)
         canvasWidget = canvas.get_tk_widget()
         canvasWidget.configure(bg=LIGHT_BG_COLOR, takefocus=False)  # not styled previously, why?
-        canvasWidget.grid(row=1)
+        canvasWidget.grid()
         self.updateFigSize = True
         self.updateScheduled = False
+        self.canvasUpdateScheduled = False
+
+    def __scrollAxesHandler(self, event):
+        ax = event.inaxes
+        if ax is None or len(ax.lines) == 0:
+            return
+        line = ax.lines[0]
+        xdata = line.get_xdata()
+        if len(xdata) <= 1:
+            return
+        mleft, mright = ax.margins()
+        xleft, xright = xdata[0]-mleft*(xdata[-1]-xdata[0]), xdata[-1]+mright*(xdata[-1]-xdata[0])
+        x0 = event.xdata
+        xmin, xmax = ax.get_xlim()
+        if event.step == -1 and (xmin <= xdata[0] and xmax >= xdata[-1]) or\
+           event.step == 1 and (xmax-xmin) <= xdata[1] - xdata[0] or\
+           event.step == 0:
+            return
+        xlstep = 0.05*(x0-xmin)
+        xrstep = 0.05*(xmax-x0)
+        xmin += event.step * xlstep
+        xmax -= event.step * xrstep
+        xmin = max(xmin, xleft)
+        xmax = min(xmax, xright)
+        if xmin == xleft and xmax == xright:
+            ax.set_autoscalex_on(True)
+        else:
+            ax.set_xlim(xmin, xmax)
+        ax.autoscale_view(tight=True)
+        if not self.canvasUpdateScheduled:
+            self.canvasUpdateScheduled = True
+            self.after(100, self.__canvasUpdate)
+
+    def __buttonPressHandler(self, event):
+        self.pressData = [None]*4
+        if event.button != 1 or event.inaxes is None or len(event.inaxes.lines) == 0:
+            return
+        ax = event.inaxes
+        x1 = event.xdata
+        marker1 = marker2 = None
+        ymin, ymax = ax.get_ylim()
+        marker1, = ax.plot([x1, x1], [ymin, ymax], ':w')
+        marker2, = ax.plot([x1, x1], [ymin, ymax], ':w')
+        self.pressData = [ax, x1, marker1, marker2]
+        ax.set_autoscaley_on(False)
+        ax.autoscale_view(tight=True)
+        self.__canvasUpdate()
+
+    def __mouseMoveHandler(self, event):
+        if event.button != 1 or event.inaxes is None or len(event.inaxes.lines) == 0 or\
+           self.pressData[0] is None or self.pressData[0] != event.inaxes:
+            return
+
+        x2 = event.xdata
+        self.pressData[3].set_data([x2, x2], self.pressData[3].get_ydata())
+        if not self.canvasUpdateScheduled:
+            self.canvasUpdateScheduled = True
+            self.after(100, self.__canvasUpdate)
+
+    def __buttonReleaseHandler(self, event):
+        if self.pressData[3] is not None:
+            ax = self.pressData[0]
+            for l in ax.lines[1:]:
+                del l
+            ax.lines = [ax.lines[0]]
+            ax.set_autoscaley_on(True)
+            self.pressData = [None]*4
+
+        ax = event.inaxes
+        if event.button != 1 and event.button != 3 or ax is None or len(ax.lines) == 0 or\
+           self.pressData[0] is None or self.pressData[0] != ax:
+            return
+        x = ax.lines[0].get_xdata()
+        if event.button == 3:
+            if len(x) > 1:
+                mleft, mright = ax.margins()
+                ax.set_xlim(x[0]-mleft*(x[-1]-x[0]), x[-1]+mright*(x[-1]-x[0]))
+            ax.set_autoscalex_on(True)
+        else:
+            x1, x2 = sorted([self.pressData[1], event.xdata])
+            if len(x) > 1 and x2-x1 > x[1]-x[0]:
+                ax.set_xlim(x1, x2)
+        ax.relim(True)
+        ax.autoscale_view(tight=False)
+        self.__canvasUpdate()
+
+    def __canvasUpdate(self):
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
+        self.canvasUpdateScheduled = False
 
     @property
     def timeSpan(self):
         try:
-            return int(self.timeSpanVar.get())
+            val = int(self.timeSpanVar.get())
+            if val < 1 or val > 600:
+                raise ValueError
+            self.prevTimeSpan = self.timeSpanVar.get()
+            return val
         except ValueError:
-            self.timeSpanVar.set('20')
-            return 20
+            self.timeSpanVar.set(self.prevTimeSpan)
+            return int(self.prevTimeSpan)
 
     @property
     def freqSpan(self):
         try:
-            return int(self.freqSpanVar.get())
+            val = int(self.freqSpanVar.get())
+            if val < 100 or val > dtg.adcSampleFrequency//2:
+                raise ValueError
+            self.prevFreqSpan = self.freqSpanVar.get()
+            return val
         except ValueError:
-            self.freqSpanVar.set('60000')
-            return 60000
+            self.freqSpanVar.set(self.prevFreqSpan)
+            return int(self.prevFreqSpan)
 
     def __calcXlim(self, x, istime: bool):
         first = x[0] if x.size > 0 else 0
@@ -424,12 +516,20 @@ class DTPlotFrame(tk.Frame):
                         xlabel = 'Время [с]' if dtg.LANG == 'ru' else 'Time [s]'
                     yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
                     title = f'{dtResultDesc[key][dtg.LANG]} [{yunit}]'
-                else:
+                elif typ == 'freq':
                     x = result['x']
                     y = result['y']
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         xlabel = 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]'
-                    title = f'Амплитуда {key}' if dtg.LANG == 'ru' else 'Amplitude {key}'
+                    title = f'Амплитуда [В/Гц]' if dtg.LANG == 'ru' else 'Amplitude {key}'
+                elif typ == 'adc':
+                    x = result['x']
+                    y = result['y']
+                    if ntypes == 1 and i == nres-1 or ntypes > 1:
+                        xlabel = 'Время [мс]' if dtg.LANG == 'ru' else 'Time [ms]'
+                    title = f'Амплитуда [В]' if dtg.LANG == 'ru' else 'Amplitude [V]'
+                else:
+                    continue
 
                 ax.plot(x, y, color=color)
                 ax.set_xlabel(xlabel)
@@ -437,9 +537,9 @@ class DTPlotFrame(tk.Frame):
                 ax.lines[0].set_ls(ls)
                 ax.lines[0].set_marker(m)
                 ax.set_title(title)
-                ax.set_xlim(*self.__calcXlim(x, result['type'] == 'time'))
-                ax.relim(True)
-                ax.autoscale_view(tight=False)
+                #ax.set_xlim(*self.__calcXlim(x, result['type'] == 'time'))
+                #ax.relim(True)
+                #ax.autoscale_view(tight=True)
                 ax.grid(self.gridOn, 'major')
         else:
             # update plots
@@ -455,13 +555,18 @@ class DTPlotFrame(tk.Frame):
                     x = result['x']
                     y = result['y']
                 line2d = ax.lines[0]
+                xprev = line2d.get_xdata()
                 line2d.set_data(x, y)
                 ls, m = [('' if c == ' ' else c) for c in self.styleVar.get()[2:]]
                 line2d.set_ls(ls)
                 line2d.set_marker(m)
-                ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
+                if typ == 'time' and not ax.get_autoscalex_on():
+                    xmin, xmax = ax.get_xlim()
+                    dx = x[-1]-xprev[-1]
+                    ax.set_xlim(xmin+dx, xmax+dx)
+                #ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
                 ax.relim(True)
-                ax.autoscale_view(tight=False)
+                ax.autoscale_view(tight=True)
 
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
@@ -481,12 +586,12 @@ class DTPlotFrame(tk.Frame):
             if len(ax.lines) == 0:
                 continue
             line2d = ax.lines[0]
-            x = line2d.get_xdata()
+            #x = line2d.get_xdata()
             line2d.set_ls(ls)
             line2d.set_marker(m)
-            ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
+            #ax.set_xlim(*self.__calcXlim(x, typ == 'time'))
             ax.relim(True)
-            ax.autoscale_view(tight=False)
+            ax.autoscale_view(tight=False, scalex=False)
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
         self.after(1000, self.__updateAxes)
@@ -778,7 +883,6 @@ class DTTaskFrame(tk.Frame):
     def __createWidgets(self):
         """Build all widgets"""
         self.configure(padx=10, pady=5)
-        availWidth = _rootWindowWidth-2*self.cget('padx')
         self.rowconfigure(0, pad=10)
         self.rowconfigure(1, weight=1)
         self.columnconfigure(0, weight=6)
@@ -1045,10 +1149,11 @@ class DTTaskFrame(tk.Frame):
         for res in self.plotvars:
             presult = self.presults[res]
             if presult['type'] == 'time':
+                # update time data for plotting
                 n = presult['n']
                 nadd = len(self.resultBuffer)
                 if n + nadd > self.resHistSize:
-                    # copy previously gathered data but no more than 0.5 of resHistSize
+                    # avoid overflow, copy previously gathered data but no more than 0.5 of resHistSize
                     #  or data that plotted
                     startTime = self.resultBuffer[-1].time - timeSpan
                     startCopyIndex = max(np.searchsorted(presult['x'], startTime, side='left'),
@@ -1064,12 +1169,18 @@ class DTTaskFrame(tk.Frame):
                         presult['y'][n] = value
                         n += 1
                     presult['n'] = n
-
-            # only FFT data need preparation for plotting, time data are always up-to-date
-            if presult['draw'] and presult['type'] == 'freq':
+            elif presult['type'] == 'freq':
+                # prepare FFT data for plotting
                 presult['y'] = y = self.resultBuffer[-1].results[res]
-                presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
-                presult['n'] = y.size
+                if presult['n'] != y.size:
+                    presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
+                    presult['n'] = y.size
+            elif presult['type'] == 'adc':
+                # prepare ADC data for plotting
+                presult['y'] = y = self.task.results[res]
+                if presult['n'] != y.size:
+                    presult['x'] = linspace(0, 1000*y.size/dtg.adcSampleFrequency, y.size, endpoint=False)
+                    presult['n'] = y.size
 
         self.plotFrame.plotGraphs(self.presults)
 
@@ -1085,10 +1196,6 @@ class DTTaskFrame(tk.Frame):
             presult['draw'] = draw = self.plotvars[res].get() != 0
             if draw:
                 cb.configure(selectimage=next(actImgIter), foreground=next(colorIter)['color'])
-                if presult['draw'] and presult['type'] == 'freq':
-                    presult['y'] = y = self.task.results[res]
-                    presult['x'] = rfftfreq((y.size-1)*2, 1./dtg.adcSampleFrequency)
-                    presult['n'] = y.size
         self.plotFrame.plotGraphs(self.presults)
 
     def __resetResHist(self):
@@ -1098,14 +1205,19 @@ class DTTaskFrame(tk.Frame):
             if res in self.presults:
                 self.presults[res]['n'] = 0
             else:
-                if res != 'FFT':  # init time data storage
+                if res == 'ADC':
+                    # stub for ADC data
+                    self.presults[res] = dict(draw=False, type='adc', n=0, x=None, y=None)
+                elif res == 'FFT':
+                    # stub for FFT data
+                    self.presults[res] = dict(draw=False, type='freq', n=0, x=None, y=None)
+                else:
+                    # init time data storage
                     self.presults[res] = dict(draw=False,
                                               type='time',
                                               n=0,  # number of points
                                               x=np.zeros(self.resHistSize, dtype='float32'),
                                               y=np.zeros(self.resHistSize, dtype='float32'))
-                else:  # stub for FFT data
-                    self.presults[res] = dict(draw=False, type='freq', n=0, x=None, y=None)
 
     def __checkRun(self):
         try:
