@@ -49,7 +49,8 @@ class DTProcess(Process):
                     print('DTProcess: Terminate command received')
                 break
             elif obj == 'debugon':
-                tasks.DEBUG = DTSerialCom.DEBUG = self.DEBUG = True
+                #tasks.DEBUG = DTSerialCom.DEBUG = self.DEBUG = True
+                self.DEBUG = True
                 print('DTProcess: DEBUG on')
             elif obj == 'debugoff':
                 DTSerialCom.DEBUG = self.DEBUG = False
@@ -76,7 +77,11 @@ class DTProcess(Process):
                     print('DTProcess: task stopped after init')
             else:  # continue with the measurements
                 while msg != 'stop' and msg != 'terminate':
+                    start = time()
                     task.measure()
+                    end = time()
+                    if self.DEBUG:
+                        print(f'DTProcess: Measurement took {end-start:.3g} seconds')
                     self.__sendResults(task)
                     if task.failed:
                         break
@@ -97,5 +102,9 @@ class DTProcess(Process):
     def __sendResults(self, task: DTTask):
         if self.DEBUG:
             print('DTProcess: Sending task results')
+        start = time()
         rtask = DTTask().results_from(task)  # copying the results to a new task object before sending
         self.conn.send(rtask)
+        end = time()
+        if self.DEBUG:
+            print(f'DTProcess: Sending took {end-start:.3g} seconds')

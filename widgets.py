@@ -446,6 +446,8 @@ class DTPlotFrame(tk.Frame):
 
         if self.pkeys != ckeys or len(self.figure.axes) == 0:
             # plot new
+            if DTApplication.DEBUG:
+                print(f'DTPlotFrame.plotGraphs(): plotting {nres} graphs')
             self.pkeys = ckeys
             self.figure.clf()
             types = list(set([typ for k, typ in ckeys.items()]))  # unique type list
@@ -488,6 +490,8 @@ class DTPlotFrame(tk.Frame):
                 ax.grid(self.gridOn, 'major')
         else:
             # update plots
+            if DTApplication.DEBUG:
+                print(f'DTPlotFrame.plotGraphs(): updating {nres} graphs')
             axes = self.figure.axes
             assert(len(axes) == nres)
             for i, (ax, key, typ) in enumerate(zip(axes, ckeys.keys(), ckeys.values())):
@@ -1034,6 +1038,8 @@ class DTTaskFrame(tk.Frame):
 
     def __update(self):
         lastResult: DTTask = self.resultBuffer[-1]
+        if DTApplication.DEBUG:
+            print(f'DTTestFrame.__update(): Result buffer contains {len(self.resultBuffer)} measurements')
         if lastResult.failed:
             self.messagebox.configure(text=lastResult.message, foreground='red')
             self.bell()
