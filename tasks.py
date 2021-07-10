@@ -154,9 +154,9 @@ class DTTask:
         global DEBUG, dtParameterDesc
         if DEBUG:
             print(self.__class__.__name__+'.load_cal(): calibration is loaded')
-        for par in ('refatt', 'refoutpower'):
-            if par in self.parameters:
-                self.parameters[par] = dtParameterDesc[par]['default']
+        if 'refatt' in self.parameters and 'refoutpower' in self.parameters:
+            self.parameters['refatt'] = dtParameterDesc['refatt']['default']
+            self.parameters['refoutpower'] = dtParameterDesc['refoutpower']['default']
 
     @classmethod
     def check_parameter(cls, par: str, value):
@@ -314,6 +314,12 @@ class DTTask:
             self.inited = src.inited
             self.completed = src.completed
         return self
+
+    def clear_results(self):
+        """ Clear results from the task
+        """
+        for res in self.results:
+            self.results[res] = None
 
     def set_id(self, id_=None):
         """ Set ID of the task. Should be called from the main process.
@@ -1006,7 +1012,7 @@ class DTDMRInputModel(DTTask):
     refFreq = DTDMRInput.refFreq
 
     def __init__(self):
-        super().__init__(('frequency', 'noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF'))
+        super().__init__(('frequency', 'noise'), ('BITERR', 'BITFREQDEV', 'BITPOWERDIF', 'FFT'))
         homedir = getenv('HOME')
         ifilename, qfilename = homedir+'/dmr/dev/Idmr_long.txt', homedir+'/dmr/dev/Qdmr_long.txt'
         self.bufsize = 255*2*25*2
@@ -1017,8 +1023,15 @@ class DTDMRInputModel(DTTask):
             print(f'DTDMRInputModel: Data loaded with length of {self.ibuffer.size}')
         except Exception:
             print_exc()
+        self.ninit = 0
+        self.nmeas = 0
 
     def init_meas(self, **kwargs):
+        if DEBUG:
+            self.ninit += 1
+            self.nmeas = 0
+            print('DTDMRInputModel.init_meas():', self.ninit)
+
         super().init_meas(**kwargs, autotest=True)
         if self.failed:
             return self
@@ -1035,6 +1048,10 @@ class DTDMRInputModel(DTTask):
         return self
 
     def measure(self):
+        if DEBUG:
+            self.nmeas += 1
+            print('DTDMRInputModel.measure()', self.nmeas)
+
         self.completed = False
         self.message = ''
         for res in self.results:
@@ -1083,6 +1100,11 @@ class DTDMRInputModel(DTTask):
         # find the bit error rate and constant symbol intervals
         maxlen = 20*200  # max length of returned Iref, Qref
         numerr, numbit, Iref, Qref, symlenref = get_ber(It, Qt, maxlen)
+
+        N = It.size
+        bwin = blackman(N)
+        bwin /= np.sqrt(sum(bwin**2)/N)
+        self.results['FFT'] = 2/N*np.abs(rfft(bwin*It))
 
         if numerr is None or numbit is None:
             self.set_eval_error(f'Too small data length - {len(self.buffer)}')

@@ -314,6 +314,7 @@ class DTPlotFrame(tk.Frame):
             menu = tk.OptionMenu(sframe, self.styleVars[ic], *styles)
             menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE},fg=c['color'])
             menu.grid(row=0, column=1, sticky=tk.W)
+        self.styleFrames[0].grid()  # for right canvas size
 
     def __createCanvas(self):
         self.canvasFrame = frame = tk.Frame(self, padx=0, pady=0)
@@ -428,6 +429,16 @@ class DTPlotFrame(tk.Frame):
            results structure:
              {reskey: {'draw': bool, 'type': ('time'|'freq'), 'n': size, 'x': array, 'y': array},...}
         """
+        if not hasattr(self, 'pkeys'):
+            self.pkeys = None
+        ckeys = dict([(k, r['type']) for k, r in results.items() if r['draw'] and r['n'] > 0])
+        nres = len(ckeys)
+        if nres == 0:
+            if self.pkeys != ckeys:
+                self.pkeys = ckeys
+                self.clearCanvas()
+            return
+
         if self.updateFigSize:
             h, w = self.canvasFrame.winfo_height(), self.canvasFrame.winfo_width()
             # print(w, h)
@@ -435,13 +446,6 @@ class DTPlotFrame(tk.Frame):
             self.figure.set_size_inches(w/dpi, h/dpi)  # real dpi differs?
             self.updateFigSize = False
 
-        if not hasattr(self, 'pkeys'):
-            self.pkeys = None
-        ckeys = dict([(k, r['type']) for k, r in results.items() if r['draw'] and r['n'] > 0])
-        nres = len(ckeys)
-        if nres == 0:
-            self.clearCanvas()
-            return
         if self.pkeys != ckeys or len(self.figure.axes) == 0:
             # plot new
             self.pkeys = ckeys
@@ -469,6 +473,7 @@ class DTPlotFrame(tk.Frame):
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         xlabel = 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]'
                     title = f'Амплитуда [В/Гц]' if dtg.LANG == 'ru' else 'Amplitude {key}'
+                    ax.semilogy()
                 elif typ == 'adc':
                     x = result['x']
                     y = result['y']
@@ -527,11 +532,21 @@ class DTPlotFrame(tk.Frame):
             line2d = ax.lines[0]
             line2d.set_ls(ls)
             line2d.set_marker(m)
+
+        for i in range(max(1, len(axes)), len(self.styleFrames)):
+            if self.styleFrames[i].winfo_ismapped():
+                self.styleFrames[i].grid_forget()
+
         self.__canvasUpdate()
         self.after(1000, self.__updateAxes)
 
     def clearCanvas(self):
+        if DTApplication.DEBUG:
+            print('DTPlotFrame.clearCanvas(): clearing canvas')
         self.figure.clf()
+        for sframe in self.styleFrames[1:]:
+            if sframe.winfo_ismapped():
+                sframe.grid_forget()
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
 
@@ -1131,12 +1146,13 @@ class DTTaskFrame(tk.Frame):
         self.plotFrame.plotGraphs(self.presults)
 
     def __resetResHist(self):
+        if DTApplication.DEBUG:
+            print('DTTaskFrame.__resetResHist(): creating/resetting data storage for plotting')
         if not hasattr(self, 'presults'):
             self.presults = dict()
         for res in self.plotvars:
             if res in self.presults:
                 self.presults[res]['n'] = 0
-                self.plotFrame.clearCanvas()
             else:
                 if res == 'ADC':
                     # stub for ADC data
@@ -1222,14 +1238,20 @@ class DTTaskFrame(tk.Frame):
 
         self.__resetResHist()
 
+        self.plotFrame.clearCanvas()
+
         for par in self.parvars:
             self.task.set_conv_par(par, self.parvars[par].get())
 
-        if hasattr(self.task, 'load_cal'):
-            self.task.load_cal()
+        self.task.load_cal()
+
+        if not DTApplication().taskProcess.is_alive():  # unexpected stop of DTProcess
+            tkmsg.showerror('DTProcess is dead. Restarting.')
+            DTApplication().startTaskProcess()
 
         self.task.set_id(self.task.id+1)  # increment id for the next run
         self.stoppedMsg = f'stopped {self.task.id}'
+        self.task.clear_results()
         DTApplication().taskConn.send(self.task)
 
         self.__configStopButton()
@@ -1239,10 +1261,11 @@ class DTTaskFrame(tk.Frame):
         self.after(10, self.__checkRun())
 
     def __flushPipe(self):
-        fd = DTApplication().taskConn.fileno()
         if DTApplication.DEBUG:
-            print(f'DTTaskFrame.__flushPipe(): flushing read buffer of fd {fd}')
-        FileIO(fd, 'r', closefd=False).flush()
+            print(f'DTTaskFrame.__flushPipe(): flushing pipe reading')
+        conn = DTApplication().taskConn
+        while conn.poll():
+            conn.recv()
 
     def __configStartButton(self):
         self.startButton.configure(text='Запуск', command=self.__runTask, bg='#21903A', activebackground='#3CA54D',
@@ -1264,24 +1287,24 @@ class DTTaskFrame(tk.Frame):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goPrev(): Signalling task stop')
         self.direction = -1
-        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
+        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.frameFinished.set(1)
 
     def __goNext(self):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goNext(): Signalling task stop')
         self.direction = 1
-        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
+        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.frameFinished.set(1)
 
     def __goMainMenu(self):
         if DTApplication.DEBUG:
             print('DTTaskFrame.__goMainMenu(): Signalling task stop')
         self.direction = 0
-        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.__flushPipe()  # flush pipe input and discard delayed measurements & probably 'stopped' message
+        DTApplication().taskConn.send('stop')  # sending 'stop' to DTProcess
         self.frameFinished.set(1)
 
     def destroy(self):

@@ -71,26 +71,28 @@ class DTProcess(Process):
             if self.conn.poll():
                 msg = self.conn.recv()
 
-            if task.failed or task.completed or msg == 'stop':
+            if task.failed or task.completed or msg == 'stop' or msg == 'terminate':
                 if self.DEBUG:
                     print('DTProcess: task stopped after init')
             else:  # continue with the measurements
-                while msg != 'stop':
+                while msg != 'stop' and msg != 'terminate':
                     task.measure()
                     self.__sendResults(task)
                     if task.failed:
                         break
                     if self.conn.poll():
                         msg = self.conn.recv()
+                        if self.DEBUG:
+                            print(f'DTProcess: received "{msg}"')
 
         except Exception as exc:
             print_exc()
-            self.conn.send(exc)
-        finally:
-            self.conn.send(f'stopped {task.id}')
-            FileIO(self.conn.fileno(), 'r', closefd=False).flush()  # flush input messages
-            if self.DEBUG:
-                print(f'DTProcess: Task "{task.name["en"]}" finished')
+            if not isinstance(exc, EOFError):
+                self.conn.send(exc)
+
+        self.conn.send(f'stopped {task.id}')
+        if self.DEBUG:
+            print(f'DTProcess: Task "{task.name["en"]}" finished')
 
     def __sendResults(self, task: DTTask):
         if self.DEBUG:
