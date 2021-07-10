@@ -874,11 +874,9 @@ class DTMeasureSensitivity(DTTask):
                 lastinlcomp = self.__measure_inl_for_att(attcode)
                 if self.failed:
                     return self
-                if lastinlcomp:  # inl < refinl
+                if lastinlcomp:  # inl <= refinl
                     attrange = attrange[midindex:]
                 else:  # inl > refinl
-                    if self.failed:  # failed to measure INL
-                        return self
                     attrange = attrange[:midindex]
         except DTComError as exc:
             self.set_com_error(exc)
@@ -908,11 +906,14 @@ class DTMeasureSensitivity(DTTask):
         return self
 
     def check_result(self, res):
-        if res == 'THRESHOLD POWER' and 'STATUS' in self.results:
-            status = self.results['STATUS']
-            return (status == 0, self.__outSymbols[status], None)
-        else:
-            return (True, None, None)
+        try:
+            if res == 'THRESHOLD POWER':
+                status = self.results['STATUS']
+                return (status == 0, self.__outSymbols[status], None)
+            else:
+                return (True, None, None)
+        except (KeyError, ValueError):
+            return (False, '?', None)
 
     def __scan_adc_range(self, limit, keepin, tsize=256):
         """Scan ADC range until readings are in the given limit"""
