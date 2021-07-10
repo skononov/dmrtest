@@ -898,7 +898,7 @@ class DTTaskFrame(tk.Frame):
             if ptype is Integral and isinstance(pvalue, Integral):
                 dvalue = str(int(pvalue))
             else:
-                dvalue = str(pvalue)
+                dvalue = ('%'+pformat) % pvalue
             parvar.set(dvalue)
 
             self.parvars[par] = parvar
@@ -1053,7 +1053,7 @@ class DTTaskFrame(tk.Frame):
             else:
                 self.messagebox.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
         elif lastResult.inited:
-            self.messagebox.configure(text='ГОТОВ', foreground='green')
+            self.messagebox.configure(text='ИЗМЕРЕНИЕ...', foreground='green')
             return
         else:
             print(lastResult)
