@@ -1,11 +1,9 @@
 from numbers import Integral
-from os import access, R_OK, getpid, getenv, pread, setpriority, PRIO_PROCESS
+from os import access, R_OK, getpid, getenv
 from time import asctime
 from traceback import print_exc, format_exception_only
-from io import FileIO
 import numpy as np
 from numpy.core.function_base import linspace
-from numpy.lib.twodim_base import _trilu_indices_form_dispatcher
 from scipy.fft import rfftfreq
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -169,7 +167,6 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         mpl.rcParams["figure.constrained_layout.h_pad"] = 0.06
         mpl.rcParams["figure.constrained_layout.w_pad"] = 0.1
         mpl.rcParams["figure.constrained_layout.hspace"] = 0.02
-        #mpl.rcParams["axes.autolimit_mode"] = 'round_numbers'
 
     def run(self):
         """Start GUI event loop
@@ -313,7 +310,7 @@ class DTPlotFrame(tk.Frame):
             self.styleVars[ic] = tk.StringVar()
             self.styleVars[ic].set(styles[0])
             menu = tk.OptionMenu(sframe, self.styleVars[ic], *styles)
-            menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE},fg=c['color'])
+            menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE}, fg=c['color'])
             menu.grid(row=0, column=1, sticky=tk.W)
         self.styleFrames[0].grid()  # for right canvas size
 
@@ -466,23 +463,21 @@ class DTPlotFrame(tk.Frame):
                     y = result['y'][:n]
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         xlabel = 'Время [с]' if dtg.LANG == 'ru' else 'Time [s]'
-                    yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
-                    title = f'{dtResultDesc[key][dtg.LANG]} [{yunit}]'
                 elif typ == 'freq':
                     x = result['x']
                     y = result['y']
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         xlabel = 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]'
-                    title = f'Амплитуда [В/Гц]' if dtg.LANG == 'ru' else 'Amplitude {key}'
-                    ax.semilogy()
                 elif typ == 'adc':
                     x = result['x']
                     y = result['y']
                     if ntypes == 1 and i == nres-1 or ntypes > 1:
                         xlabel = 'Время [мс]' if dtg.LANG == 'ru' else 'Time [ms]'
-                    title = f'Амплитуда [В]' if dtg.LANG == 'ru' else 'Amplitude [V]'
                 else:
                     continue
+
+                yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
+                title = f'{dtResultDesc[key][dtg.LANG]} [{yunit}]'
 
                 ax.plot(x, y, color=color)
                 ax.set_xlabel(xlabel)
@@ -1156,7 +1151,7 @@ class DTTaskFrame(tk.Frame):
             if res in self.presults:
                 self.presults[res]['n'] = 0
             else:
-                if res == 'ADC':
+                if res[:3] == 'ADC':
                     # stub for ADC data
                     self.presults[res] = dict(draw=False, type='adc', n=0, x=None, y=None)
                 elif res == 'FFT':
@@ -1240,7 +1235,7 @@ class DTTaskFrame(tk.Frame):
 
         self.__resetResHist()
 
-        self.plotFrame.clearCanvas()
+        #self.plotFrame.clearCanvas()
 
         for par in self.parvars:
             self.task.set_conv_par(par, self.parvars[par].get())

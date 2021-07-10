@@ -133,7 +133,7 @@ class DTSerialCom(metaclass=Singleton):
             self.port.reset_input_buffer()
             self.port.reset_output_buffer()
         except Exception as exc:
-            print(source+':', format_exception_only(exc), '\nTrying to reopen device...')
+            print(source+':', format_exception_only(type(exc), exc), '\nTrying to reopen device...')
             self.__init__(self.timeout)
 
         try:

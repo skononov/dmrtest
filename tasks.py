@@ -59,8 +59,8 @@ dtParameterDesc = {
 dtResultDesc = {
     'CARRIER': {'ru': 'Несущая f', 'en': 'Carrier f', 'dunit': 'MHz', 'format': '10.6f',
                 'tolerances': ['CARRIER abstol', 'CARRIER reltol'], 'reference': 'frequency'},
-    'INPOWER': {'ru': 'Вх. P', 'en': 'In P', 'dunit': 'dBm', 'format': '5.1f'},
-    'OUTPOWER': {'ru': 'Вых. P', 'en': 'Out P', 'dunit': 'dBm', 'format': '5.1f'},
+    'INPOWER': {'ru': 'Вх. мощность', 'en': 'In power', 'dunit': 'dBm', 'format': '5.1f'},
+    'OUTPOWER': {'ru': 'Вых. мощность', 'en': 'Out power', 'dunit': 'dBm', 'format': '5.1f'},
     'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f',
             'tolerances': ['INL uplim']},
     'MODINDEX': {'ru': 'Индекс мод.', 'en': 'Mod/ index', 'dunit': '1', 'format': '4.2f'},
@@ -68,9 +68,10 @@ dtResultDesc = {
                'tolerances': ['BITERR uplim']},
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
     'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
-    'THRESHOLD POWER': {'ru': 'Порог P', 'en': 'Thr. P', 'dunit': 'dBm', 'format': '5.1f'},
-    'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'none', 'format': ''},
-    'ADC': {'ru': 'Осциллограмма', 'en': 'Waveform', 'dunit': 'none', 'format': ''}
+    'THRESHOLD POWER': {'ru': 'Порог. мощн.', 'en': 'Thr. power', 'dunit': 'dBm', 'format': '5.1f'},
+    'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'dB', 'format': ''},
+    'ADC_I': {'ru': 'Aмплитуда I', 'en': 'Waveform I', 'dunit': 'V', 'format': ''},
+    'ADC_Q': {'ru': 'Амплитуда Q', 'en': 'Waveform Q', 'dunit': 'V', 'format': ''}
 }
 
 
@@ -494,7 +495,7 @@ class DTMeasureCarrierFrequency(DTTask):
     name = dict(ru='Измерение несущей', en='Measuring carrier')
 
     def __init__(self):
-        super().__init__(('frequency', 'datanum'), ('CARRIER', 'FFT'))
+        super().__init__(('frequency', 'datanum'), ('CARRIER', 'FFT', 'ADC_I'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -562,11 +563,15 @@ class DTMeasureCarrierFrequency(DTTask):
         bwin = blackman(N)
         bwin /= np.sqrt(sum(bwin**2)/N)
 
-        # convert data to float64 and subtract DC component
+        # convert data to volts and subtract DC component
         It0 = self.buffer0 * (2 * hfAdcRange / adcCountRange)
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
-        a0 = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It0))
+        a0 = 2/N*np.abs(rfft(bwin*It0))
+
+        self.results['ADC_I'] = It0
+
+        self.results['FFT'] = 20*np.log10(a0/np.max(a0))  # dB
 
         # convert data to float64 and subtract DC component
         It = self.buffer * (2 * hfAdcRange / adcCountRange)
@@ -606,7 +611,7 @@ class DTMeasureNonlinearity(DTTask):
 
     def __init__(self):
         super().__init__(('frequency', 'modamp', 'modfrequency', 'datanum'),
-                         ('INL', 'MODINDEX', 'FFT'))
+                         ('INL', 'MODINDEX', 'FFT', 'ADC_I', 'ADC_Q'))
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -686,10 +691,15 @@ class DTMeasureNonlinearity(DTTask):
         # Compute FFT (non-negative frequencies only)
         If = 2/N*np.abs(rfft(bwin*It))
         Qf = 2/N*np.abs(rfft(bwin*Qt))
-        self.results['FFT'] = np.sqrt(If**2 + Qf**2)
+        Af = np.sqrt(If**2 + Qf**2)
+
+        self.results['ADC_I'] = It
+        self.results['ADC_Q'] = Qt
+
+        self.results['FFT'] = 20*np.log10(Af/np.max(Af))  # dB
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
-        inl, mi = get_inl(np.sqrt(If**2+Qf**2), fm)
+        inl, mi = get_inl(Af, fm)
 
         return inl, mi
 
@@ -703,9 +713,9 @@ class DTDMRInput(DTTask):
     refFreq = np.array([symbolDevFrequency, 3*symbolDevFrequency]*2)
 
     def __init__(self):
-        super().__init__(('frequency',), ('BITERR',))
+        super().__init__(('frequency',), ('BITERR', 'ADC_I', 'ADC_Q'))
 
-        self.bufsize = 16384
+        self.bufsize = 32768  # both for I and Q channels
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
@@ -763,6 +773,7 @@ class DTDMRInput(DTTask):
         """ Do analysis of a random symbol sequence sent by the device.
             Calculate BER.
         """
+        global hfAdcRange, adcCountRange
         if self.buffer is None or len(self.buffer) != self.bufsize:
             self.set_eval_error(f'Data length ({len(self.buffer)}) differs from expected ({self.bufsize})')
             return None
@@ -773,6 +784,9 @@ class DTDMRInput(DTTask):
         # subtract the DC component for real data
         It = np.around(It-np.mean(It)).astype('int32')
         Qt = np.around(Qt-np.mean(Qt)).astype('int32')
+
+        self.results['ADC_I'] = It * 2 * hfAdcRange / adcCountRange
+        self.results['ADC_Q'] = Qt * 2 * hfAdcRange / adcCountRange
 
         # find the bit error rate and constant symbol intervals
         maxlen = 20*200  # max length of returned Iref, Qref
@@ -831,7 +845,7 @@ class DTMeasureSensitivity(DTTask):
 
     def __init__(self):
         super().__init__(('frequency', 'modfrequency', 'refinl', 'datanum', 'refatt', 'refoutpower'),
-                         ('THRESHOLD POWER', 'FFT', 'ADC', 'STATUS'))
+                         ('THRESHOLD POWER', 'FFT', 'ADC_I', 'STATUS'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -951,7 +965,7 @@ class DTMeasureSensitivity(DTTask):
         # find appropriate LF ADC range
         _, lastRelAmp = self.__scan_adc_range(0.7, False)  # try to narrow the range
         if DEBUG:
-            print(f'DTMeasureSensitivity: Rel. amplitude spread {lastRelAmp:.3f}' +\
+            print(f'DTMeasureSensitivity: Rel. amplitude spread {lastRelAmp:.3f}' +
                   f' for ADC range ±{lfAdcVoltRanges[self.adcrange]}V')
 
         if lastRelAmp > 0.9:
@@ -970,7 +984,7 @@ class DTMeasureSensitivity(DTTask):
 
         inl = self.__eval_inl()
         if DEBUG:
-            print(f'DTMeasureSensitivity: INL = {inl/100:.2f} %')
+            print(f'DTMeasureSensitivity: INL = {inl*100:.2f} %')
         if inl is None:
             self.set_eval_error('КНИ не определен' if dtg.LANG == 'ru' else 'INL is not defined')
             return False
@@ -993,10 +1007,12 @@ class DTMeasureSensitivity(DTTask):
         It = self.buffer * (lfAdcVoltRanges[self.adcrange] / adcCountRange)
         It -= np.mean(It)
 
-        self.results['ADC'] = It
-
         # Compute FFT (non-negative frequencies only)
-        af = self.results['FFT'] = 2/N*np.abs(rfft(bwin*It))
+        af = 2/N*np.abs(rfft(bwin*It))
+
+        self.results['ADC_I'] = It
+
+        self.results['FFT'] = 20*np.log10(af/np.max(af))  # dB
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
         inl, mi = get_inl(af, fm)
@@ -1105,7 +1121,9 @@ class DTDMRInputModel(DTTask):
         N = It.size
         bwin = blackman(N)
         bwin /= np.sqrt(sum(bwin**2)/N)
-        self.results['FFT'] = 2/N*np.abs(rfft(bwin*It))
+        af = 2/N*np.abs(rfft(bwin*It))
+
+        self.results['FFT'] = 20*np.log10(af/np.max(af))
 
         if numerr is None or numbit is None:
             self.set_eval_error(f'Too small data length - {len(self.buffer)}')
