@@ -127,6 +127,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*highlightBackground', DEFAULT_BG_COLOR)
         self.option_add('*activeBackground', LIGHT_BG_COLOR)
         self.option_add('*activeForeground', DEFAULT_FG_COLOR)
+        self.option_add('*disabledBackground', LIGHT_BG_COLOR)
+        self.option_add('*disabledForeground', DIMMED_FG_COLOR)
         self.option_add('*selectColor', LIGHT_BG_COLOR)
         self.option_add('*highlightThickness', '0')
         self.option_add('*Button.highlightThickness', '2')
@@ -138,12 +140,11 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*Spinbox.highlightThickness', '2')
         self.option_add('*Listbox.highlightThickness', '2')
         self.option_add('*Entry.background', DARK_BG_COLOR)
-        self.option_add('*Entry.disabledBackground', DEFAULT_BG_COLOR)
-        self.option_add('*Entry.disabledForeground', DIMMED_FG_COLOR)
         self.option_add('*Spinbox.background', DARK_BG_COLOR)
         self.option_add('*Listbox.background', DARK_BG_COLOR)
         self.option_add('*Button.background', BUTTON_BG_COLOR)
         self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
+        self.option_add('*Spinbox.readonlyBackground', LIGHT_BG_COLOR)
         self.option_add('*foreground', DEFAULT_FG_COLOR)
         self.option_add('*highlightColor', HIGHLIGHT_COLOR)
         self.option_add('*font', f'{DEFAULT_FONT_FAMILY} {DEFAULT_FONT_SIZE}')
@@ -902,12 +903,13 @@ class DTTaskFrame(tk.Frame):
 
             self.parvars[par] = parvar
 
+            entry = tk.Spinbox(paramFrame, textvariable=parvar, width=10,
+                               justify=tk.RIGHT, format='%'+pformat)
             if preadonly:
-                entry = tk.Entry(paramFrame, textvariable=parvar)
-                entry.configure(width=11, justify=tk.RIGHT, state=tk.DISABLED)
+                entry.configure(state='readonly')
             else:
-                self.parentries[par] = entry = tk.Spinbox(paramFrame, textvariable=parvar)
-                entry.configure(width=10, from_=plowlim, to=puplim, justify=tk.RIGHT, format='%'+pformat,
+                self.parentries[par] = entry
+                entry.configure(from_=plowlim, to=puplim,
                                 validate='key', validatecommand=(validateCall, '%W', '%P'))
                 if pavalues is not None:
                     entry.configure(values=pavalues)
@@ -1085,7 +1087,7 @@ class DTTaskFrame(tk.Frame):
             for par in self.parentries:
                 if par in allbadpars:
                     self.parentries[par].configure(fg='red')
-                else:
+                elif self.parentries[par]['fg'] == 'red':
                     self.parentries[par].configure(fg=self.option_get('foreground', 'Spinbox'))
 
         self.__updateAndPlotGraphs()
