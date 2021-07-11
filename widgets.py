@@ -1,5 +1,5 @@
 from numbers import Integral
-from os import access, R_OK, getpid, getenv
+from os import access, R_OK, getpid, getenv, stat
 from time import asctime
 from traceback import print_exc, format_exception_only
 import numpy as np
@@ -864,6 +864,7 @@ class DTTaskFrame(tk.Frame):
         if not DTTask.check_parameter(par, after):
             widget.configure(bg='red')
         else:
+            after = after.replace(',', '.')
             widget.configure(bg=widget.option_get('background', 'Spinbox'))
             pvalue, pformat = self.task.get_conv_par_value_and_format(par)
             if pvalue != float(after) and par.split(' ')[0] not in self.task.results:
@@ -1008,8 +1009,13 @@ class DTTaskFrame(tk.Frame):
         statusFrame.grid(row=2, sticky=tk.W+tk.E+tk.N, pady=5)
 
         self.messagebox = tk.Message(statusFrame, justify=tk.LEFT, width=300)
-        self.messagebox.grid(sticky=tk.W+tk.E)
+        self.messagebox.grid(row=0, column=0, sticky=tk.W+tk.E)
         self.progress = -1
+
+        self.waitVar = tk.StringVar()
+        tk.Label(statusFrame, textvariable=self.waitVar, padx=5, foreground='green')\
+            .grid(row=0, column=1, sticky=tk.W)
+        self.running = False
 
     def __createMenu(self):
         menuFrame = tk.Frame(self.rightFrame)
@@ -1055,7 +1061,7 @@ class DTTaskFrame(tk.Frame):
             else:
                 self.messagebox.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
         elif lastResult.inited:
-            self.messagebox.configure(text='ИЗМЕРЕНИЕ...', foreground='green')
+            self.messagebox.configure(text='ИЗМЕРЕНИЕ', foreground='green')
             return
         else:
             print(lastResult)
@@ -1094,6 +1100,14 @@ class DTTaskFrame(tk.Frame):
 
         if self.plotFrame is not None:
             self.__updateAndPlotGraphs()
+
+    def __showWaitString(self):
+        if self.running:
+            n = len(self.waitVar.get())
+            self.waitVar.set('█' * ((n+1) % 6))
+            self.after(500, self.__showWaitString)
+        else:
+            self.waitVar.set('')
 
     def __updateAndPlotGraphs(self):
         for res in self.plotvars:
@@ -1206,6 +1220,7 @@ class DTTaskFrame(tk.Frame):
                 self.__update()
 
         except Exception as exc:
+            self.running = False
             if isinstance(exc, DTUIError):
                 if exc.source == 'stop run':
                     taskConn.send('stop')
@@ -1217,15 +1232,15 @@ class DTTaskFrame(tk.Frame):
                 elif exc.source == 'run stopped':
                     if len(self.resultBuffer) > 0:
                         if DTApplication.DEBUG:
-                            print(f'DTTaskFrame.__checkRun(): Last updating frame with task results')
+                            print(f'DTTaskFrame.__checkRun(): Last update of frame with task results')
                         self.__update()
             else:
                 print('DTTaskFrame.__checkRun(): Exception caught. Stopping task run.')
                 tkmsg.showerror('Application error', '\n'.join(format_exception_only(type(exc), exc)))
             self.__flushPipe()
-            if self.messagebox['text'][:8] == 'ИЗМЕРЕНО':
+            if self.task.completed:
                 self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
-            elif self.messagebox['text'] == 'ИЗМЕРЕНИЕ...':
+            elif self.task.inited and not self.task.completed and not self.task.failed:
                 self.messagebox.configure(text='ОСТАНОВЛЕНО', foreground='yellow')
             self.__configStartButton()
         else:
@@ -1258,6 +1273,9 @@ class DTTaskFrame(tk.Frame):
         DTApplication().taskConn.send(self.task)
 
         self.__configStopButton()
+
+        self.running = True
+        self.__showWaitString()
 
         if DTApplication.DEBUG:
             print('DTTaskFrame.__runTask(): Schedule __checkRun()')
