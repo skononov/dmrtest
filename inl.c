@@ -91,12 +91,13 @@ static void calc_lmi_table()
 	}
 }
 
+//Calculate INL for frequency modulation signal
 //return 1 if OK, 0 if bad
 //fm - modulation frequency
 //*pinl - total harmonic distortion?
 //*ph - modulation index
 //amp is FFT amplitude of I or Q channel
-int get_inl(const double *amp, int num, double fm, double *pinl, double *ph)
+int get_inl_fm(const double *amp, int num, double fm, double *pinl, double *ph)
 {
 	//relative bandwidth
 	static const double freqwh=0.1;
@@ -137,7 +138,7 @@ int get_inl(const double *amp, int num, double fm, double *pinl, double *ph)
 	
 	if(ih==NH) {
 		//too high modulation index
-		fprintf(stderr, "Could not evaluate modulaiton index, too large harmonic fraction %3g\n", sqrt(p2/p1));
+		fprintf(stderr, "Could not evaluate modulation index, too large harmonic fraction %3g\n", sqrt(p2/p1));
 		return 0;
 	} else {
 		//interpolate modulaiton index to obtain more accurate value
@@ -178,6 +179,43 @@ int get_inl(const double *amp, int num, double fm, double *pinl, double *ph)
 	if (perror==0) return 0;
 
 	*pinl = sqrt(perror/ptot);
+
+	return 1;
+}
+
+//Calculate INL (THDR) for harmonic signal
+int get_inl(const double *amp, int num, double fm, double *pinl)
+{
+	//relative bandwidth
+	static const double freqwh=0.1;
+
+	double p1, pn, pd=0, fest, tmp;
+
+	*pinl = 0;
+
+	int fmin = (int)limit((fm*(1-freqwh)), 0, num-1);
+	int fmax = (int)limit((fm*(1+freqwh)), 0, num-1);
+
+	//find the main harmonic frequency & power
+	if (fmin==fmax || !peak_search(amp, fmin, fmax, &p1, &fest)) {
+		fprintf(stderr, "Could not find the main frequency peak\n");
+		return 0;
+	}
+
+	int i;
+	
+	for(i=2; i<30; i++) {
+		fmin = (int)limit(i*fest*(1-freqwh), 0, num-1);
+		fmax = (int)limit(i*fest*(1+freqwh), 0, num-1);
+		if (fmin==fmax || !peak_search(amp, fmin, fmax, &pn, &tmp)) break;
+		if (pn < 1e-15*pd) break;
+		pd += pn;
+	}
+	//printf("stopped at harmonic %d\n", i);
+
+	if (pd==0) return 0;
+
+	*pinl = sqrt(pd/(pd+p1));
 
 	return 1;
 }

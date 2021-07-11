@@ -8,7 +8,7 @@ from traceback import print_exc
 
 from dtcom import DTSerialCom
 from dtexcept import DTInternalError, DTComError
-from dt_c_api import get_peak, get_inl, get_ber
+from dt_c_api import get_peak, get_inl_fm, get_inl, get_ber
 from dtglobals import Hz, kHz, MHz, adcSampleFrequency, symbolDevFrequency, lfAdcVoltRanges, hfAdcRange, adcCountRange
 import dtglobals as dtg  # for dtg.LANG
 
@@ -20,7 +20,7 @@ DEBUG = False
 
 # dict for parameter decription and limits. All parameters are integers. Defaults are set in the subclass constructors.
 dtParameterDesc = {
-    'att': {'ru': 'Затухание', 'en': 'Attenuation', 'type': Real, 'default': 31.5,
+    'att': {'ru': 'Ослабление', 'en': 'Attenuation', 'type': Real, 'default': 31.5,
             'lowlim': 0.5, 'uplim': 31.5, 'increment': 0.5, 'dunit': 'dB', 'format': '4.1f'},
     'avenum': {'ru': 'N точек уср.', 'en': 'N av. pnts', 'type': Integral, 'default': 64,
                'lowlim': 1, 'uplim': 4096, 'increment': 1, 'dunit': '1', 'format': '4.0f'},
@@ -28,8 +28,8 @@ dtParameterDesc = {
                 'lowlim': 4, 'uplim': 16384, 'increment': 2, 'dunit': '1', 'format': '5.0f'},
     'frequency': {'ru': 'Несущая част.', 'en': 'Carrier freq.', 'type': Integral, 'default': 200*MHz,
                   'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
-    'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': 10*kHz,
-                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 100*Hz, 'dunit': 'kHz', 'format': '7.3f'},
+    'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': kHz,
+                     'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 10*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 0.5,
                'lowlim': 0, 'uplim': 1, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     # 'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
@@ -259,6 +259,14 @@ class DTTask:
     def get_conv_par_value(self, par):
         try:
             return self.parameters[par] / dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+        except (KeyError, TypeError):
+            return None
+
+    def get_conv_par_value_and_format(self, par):
+        try:
+            mult = dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+            format = dtParameterDesc[par]['format']
+            return self.parameters[par] / mult, format
         except (KeyError, TypeError):
             return None
 
@@ -565,11 +573,10 @@ class DTMeasureCarrierFrequency(DTTask):
 
         # convert data to volts and subtract DC component
         It0 = self.buffer0 * (2 * hfAdcRange / adcCountRange)
+        self.results['ADC_I'] = It0 - hfAdcRange
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
         a0 = 2/N*np.abs(rfft(bwin*It0))
-
-        self.results['ADC_I'] = It0
 
         self.results['FFT'] = 20*np.log10(a0/np.max(a0))  # dB
 
@@ -619,7 +626,7 @@ class DTMeasureNonlinearity(DTTask):
             return self
 
         macode = int(self.parameters['modamp']*0xFFFF)
-        mfcode = int(self.parameters['modfrequency']*120*kHz/(1 << 16)+0.5)
+        mfcode = int(self.parameters['modfrequency']/(120*kHz)*(1 << 16)+0.5)
 
         self.foffset = 0
         try:
@@ -685,21 +692,20 @@ class DTMeasureNonlinearity(DTTask):
 
         # convert data to Volts and subtract DC component
         It = self.buffer[:N] * (2 * hfAdcRange / adcCountRange)  # take first half of the buffer as the I input
+        self.results['ADC_I'] = It - hfAdcRange
         It -= np.mean(It)
         Qt = self.buffer[N:] * (2 * hfAdcRange / adcCountRange)  # take second half of the buffer as the Q input
+        self.results['ADC_Q'] = Qt - hfAdcRange
         Qt -= np.mean(Qt)
         # Compute FFT (non-negative frequencies only)
         If = 2/N*np.abs(rfft(bwin*It))
         Qf = 2/N*np.abs(rfft(bwin*Qt))
         Af = np.sqrt(If**2 + Qf**2)
 
-        self.results['ADC_I'] = It
-        self.results['ADC_Q'] = Qt
-
         self.results['FFT'] = 20*np.log10(Af/np.max(Af))  # dB
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
-        inl, mi = get_inl(Af, fm)
+        inl, mi = get_inl_fm(Af, fm)
 
         return inl, mi
 
@@ -758,7 +764,7 @@ class DTDMRInput(DTTask):
             self.set_eval_error()
             return self
 
-        self.results['BITERR'] = res[0]  # bit errors, %
+        self.results['BITERR'] = res  # bit errors, %
 
         self.set_success()
 
@@ -781,12 +787,12 @@ class DTDMRInput(DTTask):
         It = self.buffer[:self.bufsize//2]
         Qt = self.buffer[self.bufsize//2:]
 
-        # subtract the DC component for real data
+        self.results['ADC_I'] = hfAdcRange * (It * 2 / adcCountRange - 1)
+        self.results['ADC_Q'] = hfAdcRange * (Qt * 2 / adcCountRange - 1)
+
+        # subtract the DC component and convert to int32
         It = np.around(It-np.mean(It)).astype('int32')
         Qt = np.around(Qt-np.mean(Qt)).astype('int32')
-
-        self.results['ADC_I'] = It * 2 * hfAdcRange / adcCountRange
-        self.results['ADC_Q'] = Qt * 2 * hfAdcRange / adcCountRange
 
         # find the bit error rate and constant symbol intervals
         maxlen = 20*200  # max length of returned Iref, Qref
@@ -857,7 +863,7 @@ class DTMeasureSensitivity(DTTask):
             self.com.command('SET MEASST', 4)
 
             # set DAC to 80% of maximum amplitude and zero frequency
-            self.com.command('SET LFDAC', [52400, 0], owordsize=[2, 4])
+            self.com.command('SET LFDAC', [52400, int(3000/120/kHz*65536)], owordsize=[2, 4])
 
             isset, foffset = self.com.set_pll_freq(1, int(self.parameters['frequency'] + self.parameters['modfrequency']))
             if not isset:
@@ -978,9 +984,11 @@ class DTMeasureSensitivity(DTTask):
                 return False
 
         if DEBUG:
-            print(f'DTMeasureSensitivity: Set ADC range ±{lfAdcVoltRanges[self.adcrange]}')
+            print(f'DTMeasureSensitivity: Set ADC range ±{lfAdcVoltRanges[self.adcrange]}V')
 
         self.buffer = self.com.command('GET ADC DAT', [3, bsize], nreply=bsize)
+
+        #self.buffer = np.genfromtxt('Idmr (6).txt', 'int32')
 
         inl = self.__eval_inl()
         if DEBUG:
@@ -1004,18 +1012,17 @@ class DTMeasureSensitivity(DTTask):
         bwin /= np.sqrt(sum(bwin**2)/N)
 
         # convert data to Volts and subtract DC component
-        It = self.buffer * (lfAdcVoltRanges[self.adcrange] / adcCountRange)
+        It = self.buffer * (2 * lfAdcVoltRanges[self.adcrange] / adcCountRange)
+        self.results['ADC_I'] = It - lfAdcVoltRanges[self.adcrange]
         It -= np.mean(It)
 
         # Compute FFT (non-negative frequencies only)
         af = 2/N*np.abs(rfft(bwin*It))
 
-        self.results['ADC_I'] = It
-
         self.results['FFT'] = 20*np.log10(af/np.max(af))  # dB
 
         fm = self.parameters['modfrequency']/adcSampleFrequency * N
-        inl, mi = get_inl(af, fm)
+        inl = get_inl(af, fm)
 
         return inl
 

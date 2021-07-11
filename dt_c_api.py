@@ -34,18 +34,30 @@ def get_peak(amp, start: int, end: int):
     return c_pwr.value, c_fpeak.value
 
 
-def get_inl(amp, fm):
-    """ Return INL and modulation index for a given FFT spectrum
+def get_inl_fm(amp, fm):
+    """ Return INL and modulation index for a given FFT spectrum of FM modulated signal
         and nominal modulating frequency
     """
     c_amp = (c_double*len(amp))(*amp)
     c_inl = c_double(0)
     c_h = c_double(0)
-    rc = _libdmr.get_inl(c_amp, c_int(len(amp)), c_double(fm),
-                         byref(c_inl), byref(c_h))
+    rc = _libdmr.get_inl_fm(c_amp, c_int(len(amp)), c_double(fm),
+                            byref(c_inl), byref(c_h))
     if rc == c_int(0):
         return None, None
     return c_inl.value, c_h.value
+
+
+def get_inl(amp, f):
+    """ Return INL (THDR) for a given FFT spectrum and nominal main harmonic frequency
+    """
+    c_amp = (c_double*len(amp))(*amp)
+    c_inl = c_double(0)
+    rc = _libdmr.get_inl(c_amp, c_int(len(amp)), c_double(f),
+                         byref(c_inl))
+    if rc == c_int(0):
+        return None
+    return c_inl.value
 
 
 def get_ber(iamp, qamp, maxlen):
