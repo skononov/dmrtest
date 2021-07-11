@@ -178,8 +178,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         print('Exiting DTApplication')
         if self.taskProcess.is_alive():
             self.taskConn.send('terminate')
-            # self.taskProcess.join()
         self.taskConn.close()
+        self.childTaskConn.close()
 
     def startTaskProcess(self):
         """Method for starting a separate process for measurements
@@ -223,9 +223,10 @@ class DTApplication(tk.Tk, metaclass=Singleton):
 class DTChooseObjectMenu(tk.Menu):
     """ Univeral menu for choosing one object from a list. Uses Radiobutton widget as a menu item.
     """
-    def __init__(self, menubutton, command, objects):
+    def __init__(self, menubutton, command, objects, *args):
         super().__init__(menubutton, tearoff=0, postcommand=self.composeMenu)
         self.command = command
+        self.args = args
         self.objects = objects
         self.locName = False
         self.isDict = False
@@ -253,28 +254,24 @@ class DTChooseObjectMenu(tk.Menu):
                                      value=name, variable=self.optVar, command=self.__select)
         else:
             obj = next(iter(self.objects))
+            locName = False
+            hasName = False
             if hasattr(obj, 'name') and isinstance(obj.name, dict) and dtg.LANG in obj.name:
                 locName = True
             elif hasattr(obj, 'name') and isinstance(obj.name, str):
-                locName = False
-            else:
-                DTApplication().showMessage('Ошибка приложения. Требуется перезапуск.\n' +
-                                            self.__class__.__name__ + f': No name defined for the object of type {type(obj)}',
-                                            status='error')
-                DTApplication().quit()
-                return
+                hasName = True
             self.optVar = tk.IntVar()
             for index, obj in enumerate(self.objects):
-                self.add_radiobutton(label=obj.name[dtg.LANG] if locName else obj.name, indicatoron=False,
-                                     value=index, variable=self.optVar, command=self.__select)
+                self.add_radiobutton(label=obj.name[dtg.LANG] if locName else (obj.name if hasName else str(obj)),
+                                     indicatoron=False, value=index, variable=self.optVar, command=self.__select)
 
     def __select(self):
         opt = self.optVar.get()
         self.forget()
         if self.isSubscriptable:
-            self.command(self.objects[opt])
+            self.command(self.objects[opt], *self.args)
         else:
-            self.command(list(self.objects)[opt])
+            self.command(list(self.objects)[opt], *self.args)
 
 
 class DTPlotFrame(tk.Frame):
@@ -300,24 +297,25 @@ class DTPlotFrame(tk.Frame):
 
         styles = ('  - ', '   .', '  -.', '   o', '  -o', '   ,')
         self.styleVars = [None] * self.ncolors
-        self.styleFrames = [None] * self.ncolors
+        self.styleMenuBtns = [None] * self.ncolors
         mplcolors = mpl.rcParams["axes.prop_cycle"]
         for ic, c in enumerate(mplcolors):
             frame.columnconfigure(ic, weight=1)
-            self.styleFrames[ic] = sframe = tk.Frame(frame, padx=5, pady=3)
-            tk.Label(sframe, text=('Стиль %d' if dtg.LANG == 'ru' else f'Style %d') % (ic+1), fg=c['color'])\
-                .grid(row=0, column=0, sticky=tk.E, padx=5)
+            self.styleMenuBtns[ic] = mb = tk.Menubutton(frame)
+            mb.configure(text=('Стиль %d' if dtg.LANG == 'ru' else f'Style %d') % (ic+1), fg=c['color'])
+            mb['menu'] = mb.menu = DTChooseObjectMenu(mb, self.__pickStyle, styles, ic)
             self.styleVars[ic] = tk.StringVar()
             self.styleVars[ic].set(styles[0])
-            menu = tk.OptionMenu(sframe, self.styleVars[ic], *styles)
-            menu.configure(takefocus=True, font={MONOSPACE_FONT_FAMILY, DEFAULT_FONT_SIZE}, fg=c['color'])
-            menu.grid(row=0, column=1, sticky=tk.W)
-        self.styleFrames[0].grid()  # for right canvas size
+        self.styleMenuBtns[0].grid()  # for right canvas size
+
+    def __pickStyle(self, style, iline):
+        self.styleVars[iline].set(style)
+        self.__updateStyles()
 
     def __createCanvas(self):
         self.canvasFrame = frame = tk.Frame(self, padx=0, pady=0)
         frame.grid(row=1, sticky=tk.N+tk.S+tk.E+tk.W)
-        self.figure = Figure(figsize=(6.4, 6))  # make it big first
+        self.figure: Figure = Figure(figsize=(6.4, 6))  # make it big first
         canvas = FigureCanvasTkAgg(self.figure, master=frame)
         canvas.draw()
         canvas.mpl_connect('scroll_event', self.__scrollAxesHandler)
@@ -328,8 +326,11 @@ class DTPlotFrame(tk.Frame):
         canvasWidget.configure(bg=LIGHT_BG_COLOR, takefocus=False)  # not styled previously, why?
         canvasWidget.grid()
         self.updateFigSize = True
-        self.updateScheduled = False
         self.canvasUpdateScheduled = False
+        self.xlabels = {'time': 'Время [с]' if dtg.LANG == 'ru' else 'Time [s]',
+                        'freq': 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]',
+                        'adc': 'Время [мс]' if dtg.LANG == 'ru' else 'Time [ms]'
+                        }
 
     def __scrollAxesHandler(self, event):
         ax = event.inaxes
@@ -412,6 +413,10 @@ class DTPlotFrame(tk.Frame):
         ax = event.inaxes
         if event.button == 3 and ax is not None:
             ax.set_autoscalex_on(True)
+            grouper = ax.get_shared_x_axes()
+            for ax_ in self.figure.axes:
+                if grouper.joined(ax, ax_):
+                    ax_.set_autoscalex_on(True)
             ax.relim(True)
             ax.autoscale_view(tight=False)
             self.__canvasUpdate()
@@ -425,7 +430,7 @@ class DTPlotFrame(tk.Frame):
         """Plot all marked results. Create new subplots for the first time and
            updating them if marked results are the same as in previous call.
            results structure:
-             {reskey: {'draw': bool, 'type': ('time'|'freq'), 'n': size, 'x': array, 'y': array},...}
+             {reskey: {'draw': bool, 'type': ('time'|'freq'|'adc'), 'n': size, 'x': array, 'y': array},...}
         """
         if not hasattr(self, 'pkeys'):
             self.pkeys = None
@@ -450,44 +455,45 @@ class DTPlotFrame(tk.Frame):
                 print(f'DTPlotFrame.plotGraphs(): plotting {nres} graphs')
             self.pkeys = ckeys
             self.figure.clf()
-            types = list(set([typ for k, typ in ckeys.items()]))  # unique type list
-            ntypes = len(types)
-            self.figure.subplots(nres, 1, sharex=(ntypes == 1), subplot_kw=dict(autoscale_on=True))
+            self.figure.subplots(nres, 1, subplot_kw=dict(autoscale_on=True))
             axes = self.figure.axes
+            sharedx = dict()
             for i, (ax, key, typ) in enumerate(zip(axes, ckeys.keys(), ckeys.values())):
-                self.styleFrames[i].grid(row=0, column=i)
+                self.styleMenuBtns[i].grid(row=0, column=i)
+                if typ in sharedx:
+                    sharedx[typ].append(ax)
+                    ax.sharex(sharedx[typ][0])
+                else:
+                    sharedx[typ] = [ax]
                 result = results[key]
                 n = result['n']
                 color = f'C{i%self.ncolors}'  # cycle colors
-                xlabel = ''
                 if typ == 'time':
                     x = result['x'][:n]
                     y = result['y'][:n]
-                    if ntypes == 1 and i == nres-1 or ntypes > 1:
-                        xlabel = 'Время [с]' if dtg.LANG == 'ru' else 'Time [s]'
                 elif typ == 'freq':
                     x = result['x']
                     y = result['y']
-                    if ntypes == 1 and i == nres-1 or ntypes > 1:
-                        xlabel = 'Частота [Гц]' if dtg.LANG == 'ru' else 'Frequency [Hz]'
                 elif typ == 'adc':
                     x = result['x']
                     y = result['y']
-                    if ntypes == 1 and i == nres-1 or ntypes > 1:
-                        xlabel = 'Время [мс]' if dtg.LANG == 'ru' else 'Time [ms]'
                 else:
                     continue
 
                 yunit = dtg.units[dtResultDesc[key]['dunit']][dtg.LANG]
-                title = f'{dtResultDesc[key][dtg.LANG]} [{yunit}]'
+                title = dtResultDesc[key][dtg.LANG] + (' [' + yunit + ']' if yunit != '' else '')
 
                 ax.plot(x, y, color=color)
-                ax.set_xlabel(xlabel)
                 ls, m = [('' if c == ' ' else c) for c in self.styleVars[i].get()[2:]]
                 ax.lines[0].set_ls(ls)
                 ax.lines[0].set_marker(m)
                 ax.set_title(title)
                 ax.grid(self.gridOn, 'major')
+
+            # another iteration for x-axis titles
+            for i, (ax, key, typ) in enumerate(zip(axes, ckeys.keys(), ckeys.values())):
+                if ax is sharedx[typ][-1]:
+                    ax.set_xlabel(self.xlabels[typ])
         else:
             # update plots
             if DTApplication.DEBUG:
@@ -510,16 +516,18 @@ class DTPlotFrame(tk.Frame):
                 line2d.set_ls(ls)
                 line2d.set_marker(m)
                 if typ == 'time' and not ax.get_autoscalex_on():
-                    xmin, xmax = ax.get_xlim()
                     dx = x[-1]-xprev[-1]
-                    ax.set_xlim(xmin+dx, xmax+dx)
+                    if dx < 0:
+                        ax.set_autoscalex_on(True)
+                    else:
+                        xmin, xmax = ax.get_xlim()
+                        ax.set_xlim(xmin+dx, xmax+dx)
                 ax.relim(True)
                 ax.autoscale_view(tight=True)
 
-        self.__updateAxes()
+        self.__canvasUpdate()
 
-    def __updateAxes(self):
-        self.updateScheduled = False
+    def __updateStyles(self):
         if self.figure is None:
             return
         axes = self.figure.axes
@@ -533,20 +541,15 @@ class DTPlotFrame(tk.Frame):
             line2d.set_ls(ls)
             line2d.set_marker(m)
 
-        for i in range(max(1, len(axes)), len(self.styleFrames)):
-            if self.styleFrames[i].winfo_ismapped():
-                self.styleFrames[i].grid_forget()
-
         self.__canvasUpdate()
-        self.after(1000, self.__updateAxes)
 
     def clearCanvas(self):
         if DTApplication.DEBUG:
             print('DTPlotFrame.clearCanvas(): clearing canvas')
         self.figure.clf()
-        for sframe in self.styleFrames[1:]:
-            if sframe.winfo_ismapped():
-                sframe.grid_forget()
+        for mb in self.styleMenuBtns[1:]:
+            if mb.winfo_ismapped():
+                mb.grid_forget()
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
 
@@ -862,10 +865,9 @@ class DTTaskFrame(tk.Frame):
             widget.configure(bg='red')
         else:
             widget.configure(bg=widget.option_get('background', 'Spinbox'))
-            prevpar = self.task.parameters[par]
-            self.task.set_conv_par(par, after)
-            if prevpar != self.task.parameters[par] and par.split(' ')[0] not in self.task.results:
-                self.__flushPipe()
+            pvalue, pformat = self.task.get_conv_par_value_and_format(par)
+            if pvalue != float(after) and par.split(' ')[0] not in self.task.results:
+                self.parvars[par].set(('%'+pformat) % pvalue)
                 self.restart.set(1)
         return True
 
@@ -1046,7 +1048,6 @@ class DTTaskFrame(tk.Frame):
             return
         elif self.task.single and lastResult.completed:
             self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
-            return
         elif lastResult.completed:
             self.progress += len(self.resultBuffer)
             if lastResult.message:
@@ -1091,11 +1092,10 @@ class DTTaskFrame(tk.Frame):
                 elif self.parentries[par]['fg'] == 'red':
                     self.parentries[par].configure(fg=self.option_get('foreground', 'Spinbox'))
 
-        self.__updateAndPlotGraphs()
+        if self.plotFrame is not None:
+            self.__updateAndPlotGraphs()
 
     def __updateAndPlotGraphs(self):
-        if self.plotFrame is None:
-            return
         for res in self.plotvars:
             presult = self.presults[res]
             if presult['type'] == 'time':
@@ -1139,8 +1139,7 @@ class DTTaskFrame(tk.Frame):
             return
         actImgIter = iter(self.actplotimgs)
         colorIter = iter(mpl.rcParams["axes.prop_cycle"])
-        for res in self.plotcbs:
-            cb: tk.Checkbutton = self.plotcbs[res]
+        for res, cb in self.plotcbs.items():
             # Prepare for plotting results
             presult = self.presults[res]
             presult['draw'] = draw = self.plotvars[res].get() != 0
@@ -1222,9 +1221,12 @@ class DTTaskFrame(tk.Frame):
                         self.__update()
             else:
                 print('DTTaskFrame.__checkRun(): Exception caught. Stopping task run.')
-                print_exc()
-                tkmsg.showerror('Application error', format_exception_only(type(exc), exc))
+                tkmsg.showerror('Application error', '\n'.join(format_exception_only(type(exc), exc)))
             self.__flushPipe()
+            if self.messagebox['text'][:8] == 'ИЗМЕРЕНО':
+                self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
+            elif self.messagebox['text'] == 'ИЗМЕРЕНИЕ...':
+                self.messagebox.configure(text='ОСТАНОВЛЕНО', foreground='yellow')
             self.__configStartButton()
         else:
             self.after(100, self.__checkRun)  # check for measurements every 0.1 sec
@@ -1240,8 +1242,6 @@ class DTTaskFrame(tk.Frame):
         self.__flushPipe()
 
         self.__resetResHist()
-
-        #self.plotFrame.clearCanvas()
 
         for par in self.parvars:
             self.task.set_conv_par(par, self.parvars[par].get())
