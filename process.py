@@ -1,7 +1,6 @@
 from time import time
 from multiprocessing import Process
 from multiprocessing.connection import Connection
-from io import FileIO
 from traceback import print_exc
 
 import tasks
@@ -49,8 +48,8 @@ class DTProcess(Process):
                     print('DTProcess: Terminate command received')
                 break
             elif obj == 'debugon':
-                #tasks.DEBUG = DTSerialCom.DEBUG = self.DEBUG = True
-                self.DEBUG = True
+                #DTSerialCom.DEBUG = True
+                tasks.DEBUG = self.DEBUG = True
                 print('DTProcess: DEBUG on')
             elif obj == 'debugoff':
                 DTSerialCom.DEBUG = self.DEBUG = False
