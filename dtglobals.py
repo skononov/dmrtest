@@ -17,7 +17,7 @@ symbolDevFrequency: int = 648  # Hz
 hfAdcRange = 2.5
 
 # Input ranges of ADS868x ADC in volts (assumed bipolar) in the order of code
-lfAdcVoltRanges = (12.288, 10.240, 6.1440, 5.1200, 2.5600)
+lfAdcVoltRanges = (12.288, 10.24, 6.144, 5.12, 2.56)
 
 adcCountRange = (1 << 16)  # full count range both for LF and HF ADCs (max. value is adcCountRange-1)
 

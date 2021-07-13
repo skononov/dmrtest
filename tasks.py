@@ -31,7 +31,7 @@ dtParameterDesc = {
     'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': kHz,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 10*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 0.5,
-               'lowlim': 0, 'uplim': 1, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
+               'lowlim': 0.0, 'uplim': 1.0, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     # 'bitnum': {'ru': 'Количество бит', 'en': 'Number of bits', 'type': Integral,
     #            'lowlim': 100, 'uplim': 2000, 'increment': 100, 'dunit': '1', 'format': '4.0f'},
     'refinl': {'ru': 'Порог КНИ', 'en': 'Thr. INL', 'type': Real, 'default': 0.05,
@@ -42,6 +42,8 @@ dtParameterDesc = {
                     'dunit': 'dBm', 'format': '5.1f', 'readonly': True},
     'noise': {'ru': 'Шум', 'en': 'Noise', 'type': Real, 'default': 0.1,
               'lowlim': 0, 'uplim': 3, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
+    'adcrange': {'ru': 'Диап. НЧ АЦП', 'en': 'LF ADC Range', 'type': Real, 'default': 2.56,
+                 'lowlim': 2.56, 'uplim': 12.288, 'values': sorted(lfAdcVoltRanges), 'dunit': 'V', 'format': '6.3f'},
     # result tolerance parameters
     'CARRIER abstol': {'ru': '\u2206 f_н', 'en': '\u2206 f_c', 'type': Integral, 'default': 350*Hz,
                        'lowlim': 1, 'uplim': 10*kHz, 'increment': 1, 'dunit': 'Hz',
@@ -63,7 +65,8 @@ dtResultDesc = {
     'OUTPOWER': {'ru': 'Вых. мощность', 'en': 'Out power', 'dunit': 'dBm', 'format': '5.1f'},
     'INL': {'ru': 'КНИ', 'en': 'INL', 'dunit': '%', 'format': '5.1f',
             'tolerances': ['INL uplim']},
-    'MODINDEX': {'ru': 'Индекс мод.', 'en': 'Mod/ index', 'dunit': '1', 'format': '4.2f'},
+    'MODINDEX': {'ru': 'Индекс мод.', 'en': 'Mod. index', 'dunit': '1', 'format': '4.2f'},
+    'FREQUENCY': {'ru': 'Частота НЧ', 'en': 'LF frequency', 'dunit': 'Hz', 'format': '5.0f'},
     'BITERR': {'ru': 'BER', 'en': 'BER', 'dunit': '%', 'format': '5.1f',
                'tolerances': ['BITERR uplim']},
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
@@ -256,11 +259,19 @@ class DTTask:
             print_exc()
             return (False, None, None)
 
-    def get_conv_par_value(self, par):
+    def get_conv_par_value_str(self, par):
         try:
-            return self.parameters[par] / dtg.units[dtParameterDesc[par]['dunit']]['multiple']
+            pardesc = dtParameterDesc[par]
+            value = self.parameters[par]
         except (KeyError, TypeError):
             return None
+
+        dvalue = value / dtg.units[pardesc['dunit']]['multiple']
+        if dtParameterDesc[par]['type'] is Integral:
+            dvalue = str(int(value))
+        else:
+            dvalue = (('%' + pardesc['format']) % value).replace('.', ',')
+        return dvalue
 
     def get_conv_par_value_and_format(self, par):
         try:
@@ -273,12 +284,8 @@ class DTTask:
     def get_conv_par_all(self, par):
         global dtParameterDesc
         try:
-            if isinstance(par, tuple):
-                pardesc = dtParameterDesc[par[0]][par[1]]
-                value = self.parameters[par[0]][par[1]]
-            else:
-                pardesc = dtParameterDesc[par]
-                value = self.parameters[par]
+            pardesc = dtParameterDesc[par]
+            value = self.parameters[par]
         except KeyError:
             return None
         mult = dtg.units[pardesc['dunit']]['multiple']
@@ -1027,6 +1034,106 @@ class DTMeasureSensitivity(DTTask):
         return inl
 
 
+class DTMeasureDAC(DTTask):
+    """
+    Measuring LF DAC.
+    """
+    name = dict(ru='Измерение НЧ ЦАП', en='Measuring LF DAC')
+
+    def __init__(self):
+        super().__init__(('modamp', 'modfrequency', 'adcrange', 'datanum'),
+                         ('FREQUENCY', 'INL', 'FFT', 'ADC_I'))
+        self.buffer = None
+
+    def init_meas(self, **kwargs):
+        global lfAdcVoltRanges
+        super().init_meas(**kwargs)
+        if self.failed:
+            return self
+
+        macode = int(self.parameters['modamp']*0xFFFF)
+        mfcode = int(self.parameters['modfrequency']/(120*kHz)*(1 << 16)+0.5)
+        self.bufsize = int(self.parameters['datanum'])
+        self.adccode = int(np.argmin(np.abs(np.array(lfAdcVoltRanges)-self.parameters['adcrange'])))
+
+        try:
+            self.com.command('SET MEASST', 4)
+
+            # set DAC to 80% of maximum amplitude and zero frequency
+            self.com.command('SET LFDAC', [macode, mfcode], owordsize=[2, 4])
+
+            # set LF ADC range
+            self.com.command("SET LF RANGE", self.adccode)
+        except DTComError as exc:
+            self.set_com_error(exc)
+            return self
+
+        self.inited = True
+        return self
+
+    def measure(self):
+        self.completed = False
+        self.message = ''
+        for res in self.results:
+            self.results[res] = None
+        if self.failed:
+            return self
+
+        try:
+            self.buffer = self.com.command('GET ADC DAT', [3, self.bufsize], nreply=self.bufsize)
+        except DTComError as exc:
+            self.set_com_error(exc)
+            return self
+
+        res = self.__eval_freq_inl()
+
+        messages = []
+        if res[0] is None:
+            messages.append('Could not measure frequency')
+        if res[1] is None:
+            messages.append('Could not evaluate INL') 
+
+        if messages != []:
+            self.set_message('\n'.join(messages))
+
+        self.results['FREQUENCY'] = res[0]
+        self.results['INL'] = res[1]
+        self.set_success()
+
+        return self
+
+    def __eval_freq_inl(self):
+        global DEBUG, lfAdcVoltRanges
+
+        N = len(self.buffer)
+        bwin = blackman(N)
+        bwin /= np.sqrt(sum(bwin**2)/N)
+
+        # convert data to Volts and subtract DC component
+        It = self.buffer * (2 * lfAdcVoltRanges[self.adccode] / adcCountRange)
+        self.results['ADC_I'] = It - lfAdcVoltRanges[self.adccode]
+        It -= np.mean(It)
+
+        # Compute FFT (non-negative frequencies only)
+        af = 2/N*np.abs(rfft(bwin*It))
+
+        self.results['FFT'] = 20*np.log10(af/np.max(af))  # dB
+
+        ifreq = self.parameters['modfrequency']/adcSampleFrequency * N
+        fmin = int(0.9 * ifreq)
+        fmax = int(1.1 * ifreq)
+
+        pwr, freq_ = get_peak(af, fmin, fmax)
+
+        inl = None
+
+        if freq_ is not None:
+            freq = freq_ * adcSampleFrequency / N
+            inl = get_inl(af, freq_)
+
+        return freq, inl
+
+
 class DTDMRInputModel(DTTask):
     """
     DMR input analysis with simulated data
@@ -1274,7 +1381,8 @@ def dtTaskInit():
     dtTaskTypeDict = dict(cls=dict(), ru=dict(), en=dict())
     dtAllScenarios = dict()
     for taskClass in (DTCalibrate, DTMeasurePower, DTMeasureCarrierFrequency,
-                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity, DTDMRInputModel):
+                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity,\
+                      DTDMRInputModel, DTMeasureDAC):
         dtTaskTypes.append(taskClass)
         dtTaskTypeDict['cls'][taskClass.__name__] = taskClass
         dtTaskTypeDict['ru'][taskClass.name['ru']] = taskClass

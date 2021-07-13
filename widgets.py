@@ -864,11 +864,9 @@ class DTTaskFrame(tk.Frame):
         if not DTTask.check_parameter(par, after):
             widget.configure(bg='red')
         else:
-            after = after.replace(',', '.')
             widget.configure(bg=widget.option_get('background', 'Spinbox'))
-            pvalue, pformat = self.task.get_conv_par_value_and_format(par)
-            if pvalue != float(after) and par.split(' ')[0] not in self.task.results:
-                self.parvars[par].set(('%'+pformat) % pvalue)
+            if par.split(' ')[0] not in self.task.results:
+                self.parvars[par].set(after)
                 self.restart.set(1)
         return True
 
@@ -914,7 +912,7 @@ class DTTaskFrame(tk.Frame):
                 entry.configure(from_=plowlim, to=puplim,
                                 validate='key', validatecommand=(validateCall, '%W', '%P'))
                 if pavalues is not None:
-                    entry.configure(values=pavalues)
+                    entry.configure(values=[str(val) for val in pavalues])
                 else:  # use increment
                     entry.configure(increment=pincr)
 
@@ -1045,30 +1043,28 @@ class DTTaskFrame(tk.Frame):
             grid(row=2, columnspan=2, sticky=tk.W+tk.E, pady=10)
 
     def __update(self):
-        lastResult: DTTask = self.resultBuffer[-1]
+        self.task.results_from(self.resultBuffer[-1])
         if DTApplication.DEBUG:
             print(f'DTTestFrame.__update(): Result buffer contains {len(self.resultBuffer)} measurements')
-        if lastResult.failed:
-            self.messagebox.configure(text=lastResult.message, foreground='red')
+        if self.task.failed:
+            self.messagebox.configure(text=self.task.message, foreground='red')
             self.bell()
             return
-        elif self.task.single and lastResult.completed:
+        elif self.task.single and self.task.completed:
             self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
-        elif lastResult.completed:
+        elif self.task.completed:
             self.progress += len(self.resultBuffer)
-            if lastResult.message:
-                self.messagebox.configure(text=lastResult.message, foreground='yellow')
+            if self.task.message:
+                self.messagebox.configure(text=self.task.message, foreground='yellow')
             else:
                 self.messagebox.configure(text=f'ИЗМЕРЕНО: {self.progress}', foreground='green')
-        elif lastResult.inited:
+        elif self.task.inited:
             self.messagebox.configure(text='ИЗМЕРЕНИЕ', foreground='green')
             return
         else:
-            print(lastResult)
+            print(self.task)
             self.messagebox.configure(text='Неизвестное состояние', foreground='red')
             return
-
-        self.task.results_from(lastResult)
 
         if hasattr(self.task, 'save_cal'):
             self.task.save_cal()
@@ -1076,7 +1072,7 @@ class DTTaskFrame(tk.Frame):
         allbadpars = []
         for res in self.reslabels:
             reslabel: tk.Label = self.reslabels[res]
-            value = lastResult.get_conv_res(res)
+            value = self.task.get_conv_res(res)
             if value is not None:
                 fmt = f'%{dtResultDesc[res]["format"]}'
                 ok, show, badpars = self.task.check_result(res)
@@ -1117,8 +1113,7 @@ class DTTaskFrame(tk.Frame):
                 n = presult['n']
                 nadd = len(self.resultBuffer)
                 if n + nadd > self.resHistSize:
-                    # avoid overflow, copy previously gathered data but no more than 0.5 of resHistSize
-                    #  or data that plotted
+                    # avoid overflow, copy previously gathered data but no more than 60 sec
                     startTime = self.resultBuffer[-1].time - 60
                     startCopyIndex = max(np.searchsorted(presult['x'], startTime, side='left'),
                                          self.resHistSize//2)
@@ -1188,7 +1183,7 @@ class DTTaskFrame(tk.Frame):
         try:
             taskConn = DTApplication().taskConn
             if not DTApplication().taskProcess.is_alive():  # unexpected stop of DTProcess
-                tkmsg.showerror('DTProcess got stopped. Restarting.')
+                tkmsg.showerror('Application error', 'DTProcess is dead. Restarting.')
                 DTApplication().startTaskProcess()
                 raise DTUIError('run stopped')
 
@@ -1219,30 +1214,33 @@ class DTTaskFrame(tk.Frame):
                     print(f'DTTaskFrame.__checkRun(): Updating frame with task results')
                 self.__update()
 
-        except Exception as exc:
+        except DTUIError as exc:
             self.running = False
-            if isinstance(exc, DTUIError):
-                if exc.source == 'stop run':
-                    taskConn.send('stop')
-                elif exc.source == 'restart run':
-                    taskConn.send('stop')
-                    self.after(100, self.__runTask)
-                    self.__configPauseButton()
-                    return
-                elif exc.source == 'run stopped':
-                    if len(self.resultBuffer) > 0:
-                        if DTApplication.DEBUG:
-                            print(f'DTTaskFrame.__checkRun(): Last update of frame with task results')
-                        self.__update()
-            else:
-                print('DTTaskFrame.__checkRun(): Exception caught. Stopping task run.')
-                tkmsg.showerror('Application error', '\n'.join(format_exception_only(type(exc), exc)))
+            if exc.source == 'stop run':
+                taskConn.send('stop')
+            elif exc.source == 'restart run':
+                taskConn.send('stop')
+                self.after(100, self.__runTask)
+                self.__configPauseButton()
+                return
+            elif exc.source == 'run stopped':
+                if len(self.resultBuffer) > 0:
+                    if DTApplication.DEBUG:
+                        print(f'DTTaskFrame.__checkRun(): Last update of frame with task results')
+                    self.__update()
             self.__flushPipe()
-            if self.task.completed:
+            if self.task.completed and not self.task.failed:
                 self.messagebox.configure(text='ЗАВЕРШЕНО', foreground='green')
             elif self.task.inited and not self.task.completed and not self.task.failed:
                 self.messagebox.configure(text='ОСТАНОВЛЕНО', foreground='yellow')
             self.__configStartButton()
+        except Exception as exc:
+            self.running = False
+            self.__flushPipe()
+            self.__configStartButton()
+            self.messagebox.configure(text='ОШИБКА', foreground='red')
+            print('DTTaskFrame.__checkRun(): Exception caught. Stopping task run.')
+            tkmsg.showerror('Application error', '\n'.join(format_exception_only(type(exc), exc)))
         else:
             self.after(100, self.__checkRun)  # check for measurements every 0.1 sec
 
@@ -1264,7 +1262,7 @@ class DTTaskFrame(tk.Frame):
         self.task.load_cal()
 
         if not DTApplication().taskProcess.is_alive():  # unexpected stop of DTProcess
-            tkmsg.showerror('DTProcess is dead. Restarting.')
+            tkmsg.showerror('Application error', 'DTProcess is dead. Restarting.')
             DTApplication().startTaskProcess()
 
         self.task.set_id(self.task.id+1)  # increment id for the next run
