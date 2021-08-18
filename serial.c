@@ -288,7 +288,7 @@ int readreply(int fd, float timeout, unsigned int *reply, unsigned int nreply)
         }
         if (strncmp(ACK, buf, lenack)!=0)
             fprintf(stderr, "%s is not received\n", ACK);
-        else {
+        else if (reply != NULL) {
             char *final = buf + (endread?ntotb-lenend:ntotb);
             pos = buf+lenack;
             size_t rlength = from_le_bytes_to_uint(pos, 2);
@@ -301,8 +301,10 @@ int readreply(int fd, float timeout, unsigned int *reply, unsigned int nreply)
         }
         if (!endread)
             fprintf(stderr, "%s is not received\n", END);
-    } else
+    } else {
         printf("Empty reply\n");
+        return -1;
+    }
 
     return ireply;
 }

@@ -10,9 +10,15 @@ int main(int argc, char* argv[])
     unsigned int *odata = NULL, idata[32768];
     int iarg = 1;
 
-    const char* devfn = "/dev/ttyACM0";
-    int fd = openserial(devfn);
+    int maxfnum = 2;
+    char devfn[100];
+    
+    for (int fnum=0; fnum<=maxfnum; fnum++) {
+        sprintf(devfn, "/dev/ttyACM%d", fnum);
+        if (access(devfn, R_OK) == 0) break;
+    }
 
+    int fd = openserial(devfn);
     if (fd < 0)
         return 1;
 
