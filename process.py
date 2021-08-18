@@ -30,6 +30,7 @@ class DTProcess(Process):
 
     def run(self):
         """ Run loop and waiting for submitted tasks """
+        onoff = {True: 'ON', False: 'OFF'}
 
         # Calibration after the start
         self.calibrate()
@@ -47,13 +48,11 @@ class DTProcess(Process):
                 if self.DEBUG:
                     print('DTProcess: Terminate command received')
                 break
-            elif obj == 'debugon':
-                #DTSerialCom.DEBUG = True
-                tasks.DEBUG = self.DEBUG = True
-                print('DTProcess: DEBUG on')
-            elif obj == 'debugoff':
-                DTSerialCom.DEBUG = self.DEBUG = False
-                print('DTProcess: DEBUG off')
+            elif isinstance(obj, str) and obj[:5] == 'debug':
+                self.DEBUG = obj[6] == '1'
+                tasks.DEBUG = obj[7] == '1'
+                DTSerialCom.DEBUG = obj[8] == '1'
+                print(f'DTProcess: DEBUG: PROCESS - {onoff[self.DEBUG]}, TASKS - {onoff[tasks.DEBUG]}, COMM - {onoff[DTSerialCom.DEBUG]}')
 
         if self.DEBUG:
             print(f'DTProcess: Process {self.pid} is finishing')

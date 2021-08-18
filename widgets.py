@@ -139,6 +139,8 @@ class DTApplication(tk.Tk, metaclass=Singleton):
         self.option_add('*Listbox.highlightThickness', '2')
         self.option_add('*Entry.background', DARK_BG_COLOR)
         self.option_add('*Spinbox.background', DARK_BG_COLOR)
+        self.option_add('*Entry.insertBackground', DEFAULT_FG_COLOR)
+        self.option_add('*Spinbox.insertBackground', DEFAULT_FG_COLOR)
         self.option_add('*Listbox.background', DARK_BG_COLOR)
         self.option_add('*Button.background', BUTTON_BG_COLOR)
         self.option_add('*Menubutton.background', BUTTON_BG_COLOR)
@@ -657,17 +659,16 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         textbox.insert(tk.END, text, "normal")
         textbox.configure(state=tk.DISABLED)
 
-    def __setDebug(self):
-        DTApplication.DEBUG = (self.debugVar.get() != 0)
-        self.master.taskConn.send('debugon' if DTApplication.DEBUG else 'debugoff')
+    def __setDebugGUI(self):
+        DTApplication.DEBUG = (self.debugGUIVar.get() != 0)
+        print('DTApplication DEBUG ' + ('ON' if DTApplication.DEBUG else 'OFF'))
+
+    def __setDebugProcess(self):
+        self.master.taskConn.send('debug ' + str(self.debugProcessVar.get()) +
+                                  str(self.debugTasksVar.get()) + str(self.debugCommVar.get()))
 
     def __createMenuFrame(self):
         self.menuFrame = tk.Frame(self, padx=10, pady=10)
-
-        for i in range(1, 6):
-            self.menuFrame.rowconfigure(i, pad=20)
-        self.menuFrame.rowconfigure(6, pad=10, weight=1)
-        self.menuFrame.rowconfigure(7, weight=1)
 
         self.scenariosText = tk.StringVar()
         self.scenariosText.set(f'{len(tasks.dtAllScenarios)} сценариев определено')
@@ -677,36 +678,71 @@ class DTMainMenuFrame(tk.Frame, metaclass=Singleton):
         csmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
         csmb['menu'] = csmb.menu = DTChooseObjectMenu(csmb, command=self.__runScenario,
                                                       objects=tasks.dtAllScenarios)
-        csmb.grid(row=1, sticky=tk.W+tk.E)
+        irow = 1
+        self.menuFrame.rowconfigure(irow, pad=20)
+        csmb.grid(row=irow, sticky=tk.W+tk.E)
+        irow += 1
 
         cmmb = tk.Menubutton(self.menuFrame, text='Выбрать измерение')
         cmmb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
         cmmb['menu'] = cmmb.menu = DTChooseObjectMenu(cmmb, command=self.__chooseTask,
                                                       objects=tasks.dtTaskTypes)
-        cmmb.grid(row=2, sticky=tk.W+tk.E)
+        self.menuFrame.rowconfigure(irow, pad=20)
+        cmmb.grid(row=irow, sticky=tk.W+tk.E)
+        irow += 1
+        cmmb.focus()
 
         csb = tk.Button(self.menuFrame, text='Создать сценарий')
         csb.configure(command=self.__newScenario, height=2, highlightthickness=2)
-        csb.grid(row=3, sticky=tk.W+tk.E)
-        csb.focus()
+        self.menuFrame.rowconfigure(irow, pad=20)
+        csb.grid(row=irow, sticky=tk.W+tk.E)
+        irow += 1
 
         cdsb = self.delScenarioMB = tk.Menubutton(self.menuFrame, text='Удалить сценарий')
         cdsb.configure(relief=tk.RAISED, height=2, highlightthickness=2, takefocus=True)
         cdsb['menu'] = cdsb.menu = DTChooseObjectMenu(cdsb, command=self.__deleteScenario,
                                                       objects=tasks.dtAllScenarios)
-        cdsb.grid(row=4, sticky=tk.W+tk.E)
+        self.menuFrame.rowconfigure(irow, pad=20)
+        cdsb.grid(row=irow, sticky=tk.W+tk.E)
+        irow += 1
 
-        self.debugVar = tk.IntVar()
-        cdb = tk.Checkbutton(self.menuFrame, text='Отладка')
-        cdb.configure(variable=self.debugVar, padx=3, command=self.__setDebug)
-        cdb.grid(row=5, sticky=tk.W)
+        self.debugGUIVar = tk.IntVar()
+        self.debugProcessVar = tk.IntVar()
+        self.debugTasksVar = tk.IntVar()
+        self.debugCommVar = tk.IntVar()
+        cdbgui = tk.Checkbutton(self.menuFrame, text='Отладка ГУИ')
+        cdbgui.configure(variable=self.debugGUIVar, padx=3, command=self.__setDebugGUI)
+        self.menuFrame.rowconfigure(irow, pad=3)
+        cdbgui.grid(row=irow, sticky=tk.W)
+        irow += 1
+
+        cdbproc = tk.Checkbutton(self.menuFrame, text='Отладка процесса')
+        cdbproc.configure(variable=self.debugProcessVar, padx=3, command=self.__setDebugProcess)
+        self.menuFrame.rowconfigure(irow, pad=3)
+        cdbproc.grid(row=irow, sticky=tk.W)
+        irow += 1
+
+        cdbtask = tk.Checkbutton(self.menuFrame, text='Отладка режимов')
+        cdbtask.configure(variable=self.debugTasksVar, padx=3, command=self.__setDebugProcess)
+        self.menuFrame.rowconfigure(irow, pad=3)
+        cdbtask.grid(row=irow, sticky=tk.W)
+        irow += 1
+
+        cdbcomm = tk.Checkbutton(self.menuFrame, text='Отладка комм.')
+        cdbcomm.configure(variable=self.debugCommVar, padx=3, command=self.__setDebugProcess)
+        self.menuFrame.rowconfigure(irow, pad=3)
+        cdbcomm.grid(row=irow, sticky=tk.W)
+        irow += 1
 
         saveb = tk.Button(self.menuFrame, text='Сохранить\nконфигурацию')
         saveb.configure(height=2, command=DTConfiguration().save)
-        saveb.grid(row=6, sticky=tk.W+tk.E+tk.S)
+        self.menuFrame.rowconfigure(irow, weight=1)
+        saveb.grid(row=irow, sticky=tk.W+tk.E+tk.S)
+        irow += 1
 
-        quitb = tk.Button(self.menuFrame, text='Выход', command=self.quit, height=2)
-        quitb.grid(row=7, sticky=tk.W+tk.E+tk.S)
+        # quitb = tk.Button(self.menuFrame, text='Выход', command=self.quit, height=2)
+        # self.menuFrame.rowconfigure(irow, weight=1)
+        # quitb.grid(row=irow, sticky=tk.W+tk.E+tk.S)
 
         if len(tasks.dtAllScenarios) == 0:
             cdsb['state'] = tk.DISABLED

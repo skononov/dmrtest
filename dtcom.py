@@ -70,15 +70,17 @@ class DTSerialCom(metaclass=Singleton):
 
         source = 'DTSerialCom.command()'
 
-        # COMMAND null-terminated
         if isinstance(command, str):
-            command = bytes(command, encoding='utf-8')
-            packet = b'\0' + command + b'\0'
-        elif isinstance(command, bytes) or isinstance(command, bytearray):
+            command = bytes(command, 'utf-8')
+        elif isinstance(command, bytearray):
             command = bytes(command)
-            packet = b'\0' + command + b'\0'
+        elif isinstance(command, bytes):
+            pass
         else:
             raise DTInternalError(f'Invalid type of command argument: {type(command)}')
+
+        # COMMAND null-terminated
+        packet = b'\0' + command + b'\0'
 
         if isinstance(odata, bytes) or isinstance(odata, bytearray):
             packet += bytes(odata)
@@ -125,9 +127,6 @@ class DTSerialCom(metaclass=Singleton):
         # null-terminated END
         packet += _END + b'\0'
 
-        if DEBUG:
-            print(f'{source}: sending {packet}')
-
         # Flush all buffers before communication
         try:
             self.port.reset_input_buffer()
@@ -135,6 +134,13 @@ class DTSerialCom(metaclass=Singleton):
         except Exception as exc:
             print(source+':', format_exception_only(type(exc), exc), '\nTrying to reopen device...')
             self.__init__(self.timeout)
+
+        if DEBUG:
+            print(f'{source}: sending: \\x00' + command.decode('utf-8') + '\\x00', end='')
+            sdata = ''
+            for b in packet[len(command)+2:-(_lenEND+1)]:
+                sdata += '\\x%02x' % b
+            print(sdata+_END.decode('utf-8')+'\\x00')
 
         try:
             nw = self.port.write(packet)
@@ -202,7 +208,7 @@ class DTSerialCom(metaclass=Singleton):
 
         return rdata
 
-    def wait_status(self, mask: int, timeout=10):
+    def wait_status(self, mask: int, timeout=2):
         start = time.time()
         while 1:
             resp = self.command('STATUS', nreply=1)
@@ -210,21 +216,22 @@ class DTSerialCom(metaclass=Singleton):
                 return (True, resp[0])
             if timeout != 0 and time.time()-start > timeout:
                 return (False, resp[0] if len(resp) > 0 else None)
-            time.sleep(0.2)
+            time.sleep(0.1)
 
     def set_pll_freq(self, pllnum: int, frequency: int):
         if pllnum not in (1, 2):
             raise DTInternalError('DTSerialCom.set_pll_freq()', f'Illegal PLL_NUM value: {pllnum}')
-        for foffset in (0, -5, 5):
-            regs = get_pll_regs(frequency+foffset)
-            if regs is None:
-                continue
-            self.command('SET PLL', [1, 1])
-            self.command('LOAD PLL', [pllnum, *regs], owordsize=[2]+6*[4])
-            isset, _status = self.wait_status(1 << (1+pllnum), timeout=2)
-            if isset:
-                return isset, foffset
-        return False, 0
+        if pllnum == 2:  # multiply demodulator frequency by 2
+            frequency *= 2
+        regs = get_pll_regs(frequency)
+        if regs is None:
+            return False
+        self.command('SET PLL', [1, 1])
+        self.command('LOAD PLL', [pllnum, *regs], owordsize=[2]+6*[4])
+        isset, _status = self.wait_status(1 << (1+pllnum), timeout=0.6)
+        if DTSerialCom.DEBUG:
+            print(f'DTSerialCom.set_pll_freq({pllnum}, {frequency}): ' + ('success' if isset else 'failed'))
+        return isset
 
     def __del__(self):
         if hasattr(self, 'port') and self.port.isOpen:
