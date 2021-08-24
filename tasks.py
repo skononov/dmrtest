@@ -27,7 +27,7 @@ dtParameterDesc = {
     'datanum': {'ru': 'N точек АЦП', 'en': 'N ADC pnts', 'type': Integral, 'default': 16384,
                 'lowlim': 4, 'uplim': 16384, 'increment': 2, 'dunit': '1', 'format': '5.0f'},
     'frequency': {'ru': 'Несущая част.', 'en': 'Carrier freq.', 'type': Integral, 'default': 150*MHz,
-                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*MHz, 'dunit': 'MHz', 'format': '10.6f'},
+                  'lowlim': 138*MHz, 'uplim': 800*MHz, 'increment': 1*kHz, 'dunit': 'MHz', 'format': '10.6f'},
     'modfrequency': {'ru': 'Частота мод.', 'en': 'Mod. frequency', 'type': Integral, 'default': kHz,
                      'lowlim': 1*Hz, 'uplim': 100*kHz, 'increment': 10*Hz, 'dunit': 'kHz', 'format': '7.3f'},
     'modamp': {'ru': 'Ампл. мод.', 'en': 'Mod. ampl.', 'type': Real, 'default': 0.5,
@@ -640,18 +640,17 @@ class DTMeasureCarrierFrequency(DTTask):
 
         # convert data to volts and subtract DC component
         It0 = self.buffer0 * (2 * hfAdcRange / adcCountRange)
+        self.results['ADC_I'] = It0 - hfAdcRange
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
         a0 = 2/N*np.abs(rfft(bwin*It0))
+        self.results['FFT'] = 20*np.log10(a0/np.max(a0))  # dB
 
         # convert data to float64 and subtract DC component
         It = self.buffer * (2 * hfAdcRange / adcCountRange)
         It -= np.mean(It)
         # FFT for PLL frequency with offset
         aoff = 2/N*np.abs(rfft(bwin*It))
-
-        self.results['ADC_I'] = It0 - hfAdcRange
-        self.results['FFT'] = 20*np.log10(a0/np.max(a0))  # dB
 
         p0, f0 = get_peak(a0, 0, len(a0)-1)
         poff, foff = get_peak(aoff, 0, len(aoff)-1)
