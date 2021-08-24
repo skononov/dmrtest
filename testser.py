@@ -32,8 +32,8 @@ elif args.command == 'SET PLLFREQ':
         print(f'"SET PLLFREQ" should be supplied with 2 integers')
         exit(1)
     print(f"Setting frequency {args.data[1]} Hz to PLL {args.data[0]} and wait locking...")
-    isset, foffset = com.set_pll_freq(args.data[0], args.data[1])
-    print(f'Frequency is{"" if isset else " not"} set.' + (f' FOFFSET={foffset}' if isset else ''))
+    isset = com.set_pll_freq(args.data[0], args.data[1])
+    print(f'Frequency is{"" if isset else " not"} set.')
     exit(0)
 elif args.command == 'SET LFDAC':
     if len(args.data) != 2:
