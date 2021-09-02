@@ -1,5 +1,6 @@
-from dt_c_api import get_peak, get_inl
-from numpy import pi, linspace, sin, abs, sqrt
+from dtglobals import hfAdcRange
+from dt_c_api import get_peak, get_inl_fm
+from numpy import pi, linspace, sin, abs, sqrt, floor, floor
 from numpy.fft import rfft as np_rfft
 try:
     import pyfftw
@@ -19,22 +20,26 @@ if __name__ == "__main__":
     rng = default_rng(int(time()))
 
     print("\nTesting spectrum peak search & INL")
-    N = 16384  # number of ADC points
+    A0 = 1  # amplitude of the main harmonic in Volts
+    A0c = A0/hfAdcRange*(2**31)  # amplitude of main harmonics in ADC LSB
+    N = 16384  # number of ADC counts
     T = 1/120000.  # sampling period in s
-    fm = 10000  # modulating frequency
-    d = 2  # modulation index
-    rmsnoise = 0.001  # rms of noise added
+    fm = 1000  # modulating frequency
+    h = 0.6  # modulation index
+    nh = 20  # number of harmonics counted
+    rmsnoise = 0.001  # rms of noise added in Volts
+    rmsnoise_c = rmsnoise/hfAdcRange*(2**31)  # rms of noise added in ADC LSB
     t = linspace(0, T*N, N, endpoint=False)
 
-    at = sum([jn(n, d)/jn(1, d) * sin(2*pi*(n*fm*t + rng.random()))
-              for n in range(1, 10)]) + rng.normal(0, rmsnoise, N)
+    print(f"Number of harmonics counted is {nh}")
+
+    at = floor(sum([A0c * jn(n, h)/jn(1, h) * sin(2*pi*(n*fm*t + rng.random())) for n in range(1, nh+1)]) +
+               rng.normal(0, rmsnoise_c, N)) / (2**31) * hfAdcRange
 
     bwin = blackman(N)
     bwin /= sqrt(sum(bwin**2)/N)
 
-    atw = bwin*sum([jn(n, d)/jn(1, d)*sin(2*pi*(n*fm*t + rng.random()))
-                    for n in range(1, 10)])
-    atw += rng.normal(0, rmsnoise, N)
+    atw = bwin*at
 
     f = rfftfreq(N, T)
     af = 2/N*abs(rfft(at))
@@ -66,12 +71,12 @@ if __name__ == "__main__":
     print(f"Raw signal: Power={pwr:4g}, Fpeak={fpeak:.1f}Hz")
     print(f"Signal w. Blackman: Power={pwrw:4g}, Fpeak={fpeakw:.1f}Hz")
 
-    dt = timeit.timeit('get_inl(af, fm*N*T)',
+    dt = timeit.timeit('get_inl_fm(af, fm*N*T)',
                        number=100, globals=globals())/100
-    print(f'get_inl execution time: {dt:3g} sec')
+    print(f'get_inl_fm execution time: {dt:3g} sec')
 
-    inl, mi = get_inl(af, fm*N*T)
-    inlw, miw = get_inl(afw, fm*N*T)
+    inl, mi = get_inl_fm(af, fm*N*T)
+    inlw, miw = get_inl_fm(afw, fm*N*T)
     print(f"Raw signal: INL={inl:5g}, MI={mi:.2f}")
     print(f"Signal w. Blackman: INL={inlw:5g}, MI={miw:.2f}")
 
@@ -82,7 +87,7 @@ if __name__ == "__main__":
     plt.xlabel('Time, s')
     plt.ylabel('Amplitude')
     plt.legend()
-    plt.title(r'$f_{mod}$=%.1f kHz, MI=%.1f, $RMS_{noise}=%2g$' % (fm/1000, d, rmsnoise))
+    plt.title(r'$f_{mod}$=%.1f kHz, MI=%.1f, $RMS_{noise}=%2g$' % (fm/1000, h, rmsnoise))
 
     plt.subplot(212)
     plt.plot(f, af, label='Raw signal FFT')
