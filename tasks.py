@@ -44,6 +44,8 @@ dtParameterDesc = {
               'lowlim': 0, 'uplim': 3, 'increment': 0.01, 'dunit': '%', 'format': '5.1f'},
     'adcrange': {'ru': 'Диап. НЧ АЦП', 'en': 'LF ADC Range', 'type': Real, 'default': 2.56,
                  'lowlim': 2.56, 'uplim': 12.288, 'values': sorted(lfAdcVoltRanges), 'dunit': 'V', 'format': '6.3f'},
+    'demodgain': {'ru': 'Усил. демод.', 'en': 'Demod gain', 'type': Real, 'default': 20,
+                  'lowlim': 0, 'uplim': 100, 'increment': 1, 'dunit': '1', 'format': '3.0f'},
     # result tolerance parameters
     'CARRIER abstol': {'ru': '\u2206 f_н', 'en': '\u2206 f_c', 'type': Integral, 'default': 350*Hz,
                        'lowlim': 1, 'uplim': 10*kHz, 'increment': 1, 'dunit': 'Hz',
@@ -72,9 +74,10 @@ dtResultDesc = {
     'BITPOWERDIF': {'ru': '\u2206 P', 'en': '\u2206 P', 'dunit': '%', 'format': '5.1f'},
     'BITFREQDEV': {'ru': '\u2206 f', 'en': '\u2206 f', 'dunit': 'Hz', 'format': '5.1f'},
     'THRESHOLD POWER': {'ru': 'Порог. мощн.', 'en': 'Thr. power', 'dunit': 'dBm', 'format': '5.1f'},
+    'HFARMS': {'ru': 'RMS ВЧ АЦП', 'en': 'RMS HF ADC', 'dunit': 'V', 'format': '5.3f'},
     'FFT': {'ru': 'Спектр', 'en': 'Spectrum', 'dunit': 'dB', 'format': ''},
-    'ADC_I': {'ru': 'Aмплитуда I', 'en': 'Waveform I', 'dunit': 'V', 'format': ''},
-    'ADC_Q': {'ru': 'Амплитуда Q', 'en': 'Waveform Q', 'dunit': 'V', 'format': ''}
+    'ADC_I': {'ru': 'Aмпл. I', 'en': 'Waveform I', 'dunit': 'V', 'format': ''},
+    'ADC_Q': {'ru': 'Ампл. Q', 'en': 'Waveform Q', 'dunit': 'V', 'format': ''}
 }
 
 
@@ -127,7 +130,7 @@ class DTTask:
         self.id = None  # ID of the task (set once in the main process)
 
     def init_meas(self, **kwargs):
-        """ This method should be implemented to initialise the device just before the task run
+        """ This method should be reimplemented to initialise the device just before the task run
         """
         self.failed = self.completed = self.inited = False
         self.message = ''
@@ -148,8 +151,12 @@ class DTTask:
         return self
 
     def measure(self):
-        """ This method should be implemented to perform one measurement
+        """ This method should be reimplemented to perform one measurement
         """
+        self.completed = False
+        self.message = ''
+        for res in self.results:
+            self.results[res] = None
         return self
 
     def load_cal(self):
@@ -406,10 +413,10 @@ class DTTask:
                '\n>'
 
 
-class DTCalibrate(DTTask):
+class DTCalibrateDcComp(DTTask):
     """Calibration.
     """
-    name = dict(ru='Калибровка', en='Calibration')
+    name = dict(ru='Калибровка смещения I&Q', en='Calibration of I&Q bias')
 
     def __init__(self):
         super().__init__()
@@ -422,7 +429,7 @@ class DTCalibrate(DTTask):
 
         try:
             self.com.command('SET RF_PATH', 0)
-            self.com.command('SET DEMOD', [1, 100])
+            self.com.command('SET DEMOD', [1, 20])
             self.com.command('SET MOD', 0)
             self.com.command('SET MEASST', 1)
             self.com.command('SET DCCOMP', 1)
@@ -450,67 +457,41 @@ class DTMeasurePower(DTTask):
     """
     name = dict(ru='Измерение мощности', en='Measuring power')
 
-    adcCountToPower = 3/34  # [dBm/ADC_LSB]
-    minPowerRange = -70  # dBm
-    # Power[dBm] = ADC_counts*adcCountToPower + minPowerRange
+    mVTodBm = 1/16       # [dBm/mV]
+    adcCountTomV = 2.03  # [mV/ADC_LSB]
+    powerShift = -70     # [dBm]
+    voltageShift = 24    # [mV]
+    atcPedestal = -2     # [counts]
+    # Power[dBm] = ((ADC_counts-atcPedestal)*adcCountTomV - voltageShift)*mVTodBm + powerShift
 
     def __init__(self, parameters=None, results=None):
         super().__init__(parameters, results)
-        self.pwrs = None
+        self.pwrs = [None] * 2
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
         try:
-            counts = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
+            self.pwrs = self.measurePower()
         except DTComError as exc:
             self.set_com_error(exc)
             return self
-
-        self.pwrs = self.__evalPower(counts)
 
         self.set_success()
         return self
 
-    def __evalPower(self, counts):
-        return [c * self.adcCountToPower + self.minPowerRange for c in counts]
+    def measurePower(self):
+        """Measure input and output powers [dBm]"""
+        counts = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
+        return [((c-self.atcPedestal) * self.adcCountTomV - self.voltageShift) * self.mVTodBm + self.powerShift for c in counts]
 
-
-class DTMeasureInputPower(DTMeasurePower):
-    """
-    Measuring input power.
-    """
-    name = dict(ru='Измерение вх. мощности', en='Measuring input power')
-
-    def __init__(self):
-        super().__init__(('avenum',), ('INPOWER',))
-
-    def init_meas(self, **kwargs):
-        super().init_meas(**kwargs)
-        if self.failed:
-            return self
-
-        try:
-            self.com.command('SET RF_PATH', 1)
-        except DTComError as exc:
-            self.set_com_error(exc)
-            return self
-
-        self.inited = True
-        return self
-
-    def measure(self):
-        super().measure()
-
-        if self.completed:
-            self.results['INPOWER'] = self.pwrs[1]
-
-        return self
+    def getDemodGain(self, inpwr):
+        """Get demodulator gain depending on measured input power [dBm].
+           Gain is in the range from 0 to 100.
+        """
+        return min(100, max(0, int(100-2*(inpwr+40))))
 
 
 class DTCalibrateOutputPower(DTMeasurePower):
@@ -532,9 +513,8 @@ class DTCalibrateOutputPower(DTMeasurePower):
             self.com.command('SET MOD', 1)
             attcode = int(2*self.parameters['att']+0.5)
             self.com.command('SET ATT', attcode)
-            isset1 = self.com.set_pll_freq(1, int(self.parameters['frequency']))
-            isset2 = self.com.set_pll_freq(2, int(self.parameters['frequency']))
-            if not isset1 or not isset2:
+            isset = self.com.set_pll_freq(1, int(self.parameters['frequency']))
+            if not isset:
                 self.set_pll_error()
                 return self
         except DTComError as exc:
@@ -559,16 +539,16 @@ class DTCalibrateOutputPower(DTMeasurePower):
             dtParameterDesc['refatt']['default'] = self.parameters['att']
 
 
-class DTMeasureCarrierFrequency(DTTask):
+class DTMeasureInput(DTMeasurePower):
     """
-    Measuring carrier frequency.
+    Measuring input power and carrier frequency.
     """
-    nominalCarrierOffset = 10*kHz  # auxillary offset of PLL frequency
+    nominalCarrierOffset = 5*kHz  # auxillary offset of PLL frequency
 
-    name = dict(ru='Измерение несущей', en='Measuring carrier')
+    name = dict(ru='Измерение аналогового входа', en='Measuring analogue input')
 
     def __init__(self):
-        super().__init__(('frequency', 'datanum'), ('CARRIER', 'FFT', 'ADC_I'))
+        super().__init__(('frequency', 'avenum', 'datanum'), ('INPOWER', 'CARRIER', 'FFT', 'ADC_I'))
         self.buffer = None
 
     def init_meas(self, **kwargs):
@@ -578,8 +558,6 @@ class DTMeasureCarrierFrequency(DTTask):
 
         try:
             self.com.command('SET MEASST', 1)
-            self.com.command('SET RF_PATH', 0)
-            self.com.command('SET DEMOD', [1, 100])
             self.com.command('SET MOD', 0)
         except DTComError as exc:
             self.set_com_error(exc)
@@ -589,14 +567,18 @@ class DTMeasureCarrierFrequency(DTTask):
         return self
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
-        if self.failed:
-            return self
-
+        global DEBUG
+        DTTask.measure(self)
         try:
+            self.com.command('SET RF_PATH', 1)
+            self.results['INPOWER'] = self.measurePower()[1]
+
+            dmgain = self.getDemodGain(self.results['INPOWER'])
+            if DEBUG:
+                print(f'DTMeasureInput: Set demodulator gain {dmgain}')
+            self.com.command('SET DEMOD', [1, dmgain])
+
+            self.com.command('SET RF_PATH', 0)
             isset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
@@ -628,9 +610,10 @@ class DTMeasureCarrierFrequency(DTTask):
         return self
 
     def __eval_carrier_freq(self):
-        global hfAdcRange, adcCountRange
+        global hfAdcRange, adcCountRange, adcSampleFrequency
         if self.buffer is None or self.buffer0.size != self.buffer.size != self.parameters['datanum']:
-            self.set_eval_error('Inconsistent data buffer size')
+            self.set_eval_error('Несогласующийся размер буффера' if dtg.LANG == 'ru'
+                                else 'Inconsistent data buffer size')
             return None
 
         N = self.parameters['datanum']
@@ -676,6 +659,95 @@ class DTMeasureCarrierFrequency(DTTask):
             return None
 
 
+class DTCalibrateDemodGain(DTMeasurePower):
+    """
+    Calibrate demodulator gain dependance on input power
+    """
+    name = dict(ru='Калибровка усиления демодулятора', en='Calibrate demodulator gain')
+
+    thrHarmonicPower = -50  # dB
+
+    def __init__(self):
+        super().__init__(('frequency', 'demodgain', 'datanum', 'avenum'), ('INPOWER', 'HFARMS', 'FFT', 'ADC_I'))
+        self.buffer = None
+
+    def init_meas(self, **kwargs):
+        super().init_meas(**kwargs)
+        if self.failed:
+            return self
+
+        try:
+            self.com.command('SET MEASST', 1)
+            self.com.command('SET MOD', 0)
+        except DTComError as exc:
+            self.set_com_error(exc)
+            return self
+
+        # preparing Blackman window
+        N = int(self.parameters['datanum'])
+        self.bwin = blackman(N)
+        self.bwin /= np.sqrt(sum(self.bwin**2)/N)
+
+        self.inited = True
+        return self
+
+    def measure(self):
+        DTTask.measure(self)
+        try:
+            self.com.command('SET RF_PATH', 1)
+            self.results['INPOWER'] = self.measurePower()[1]
+
+            if DEBUG:
+                print(f'DTCalibrateDemodGain: Input power {self.results["INPOWER"]:.1f} dBm')
+
+            self.com.command('SET RF_PATH', 0)
+
+            self.com.command('SET DEMOD', [1, int(self.parameters['demodgain'])])
+
+            isset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
+            if not isset:
+                self.set_pll_error()
+                return self
+
+            self.__eval_spectrum()
+
+        except DTComError as exc:
+            self.set_com_error(exc)
+            return self
+
+        self.set_success()
+
+        return self
+
+    def __eval_spectrum(self):
+        global hfAdcRange, adcCountRange, adcSampleFrequency
+
+        N = int(self.parameters['datanum'])
+        self.buffer = self.com.command('GET ADC DAT', [1, N], nreply=N)
+
+        # convert data to volts and subtract DC component
+        It0: np.ndarray = self.buffer * (2 * hfAdcRange / adcCountRange)
+        self.results['HFARMS'] = It0.std()
+        self.results['ADC_I'] = It0 - hfAdcRange
+        It0 -= np.mean(It0)
+        # FFT for nominal PLL frequency
+        af = 2/N*np.abs(rfft(self.bwin*It0))
+        af /= np.max(af)
+        self.results['FFT'] = 20*np.log10(af)  # dB
+
+        # find main harmonic power and frequency
+        p1, f1 = get_peak(af, 0, len(af)-1)
+
+        if f1 is None:
+            self.set_message('Сигнал несущей не обнаружен' if dtg.LANG == 'ru' else 'No carrier signal')
+            return False
+
+        if DEBUG:
+            print(f'DTCalibrateDemodGain: Main harmonic frequency {f1/N*adcSampleFrequency:.1f} Hz')
+
+        return True
+
+
 class DTMeasureNonlinearity(DTTask):
     """
     Measuring nonlinearity.
@@ -695,8 +767,9 @@ class DTMeasureNonlinearity(DTTask):
         mfcode = int(self.parameters['modfrequency']/(120*kHz)*(1 << 16)+0.5)
 
         try:
+            self.com.command('SET RF_PATH', 0)
             self.com.command('SET MEASST', 2)
-            isset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
+            isset = self.com.set_pll_freq(1, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -710,10 +783,7 @@ class DTMeasureNonlinearity(DTTask):
         return self
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
@@ -741,7 +811,7 @@ class DTMeasureNonlinearity(DTTask):
         return self
 
     def __eval_inl(self):
-        global hfAdcRange, adcCountRange
+        global hfAdcRange, adcCountRange, adcSampleFrequency
         if self.buffer is None:
             return None
 
@@ -795,6 +865,9 @@ class DTDMRInput(DTTask):
 
         try:
             self.com.command('SET MEASST', 1)
+            self.com.command('SET RF_PATH', 0)
+            self.com.command('SET MOD', 0)
+            self.com.command('SET DEMOD', [1, 20])
             isset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
@@ -807,10 +880,7 @@ class DTDMRInput(DTTask):
         return self
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
@@ -941,10 +1011,7 @@ class DTMeasureSensitivity(DTTask):
         return self
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
@@ -1067,7 +1134,7 @@ class DTMeasureSensitivity(DTTask):
         return False
 
     def __eval_inl(self):
-        global adcCountRange, lfAdcVoltRanges
+        global adcCountRange, lfAdcVoltRanges, adcSampleFrequency
         if self.buffer is None:
             return None
 
@@ -1129,10 +1196,7 @@ class DTMeasureDAC(DTTask):
         return self
 
     def measure(self):
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
@@ -1160,7 +1224,7 @@ class DTMeasureDAC(DTTask):
         return self
 
     def __eval_freq_inl(self):
-        global DEBUG, lfAdcVoltRanges
+        global DEBUG, lfAdcVoltRanges, adcSampleFrequency
 
         N = len(self.buffer)
         bwin = blackman(N)
@@ -1240,10 +1304,7 @@ class DTDMRInputModel(DTTask):
             self.nmeas += 1
             print('DTDMRInputModel.measure()', self.nmeas)
 
-        self.completed = False
-        self.message = ''
-        for res in self.results:
-            self.results[res] = None
+        super().measure()
         if self.failed:
             return self
 
@@ -1268,7 +1329,7 @@ class DTDMRInputModel(DTTask):
             Calculate BER.
             Extract maximum frequency deviation of a symbol and power difference between symbols.
         """
-        global DEBUG
+        global DEBUG, adcSampleFrequency
 
         if It is None or Qt is None:
             if self.buffer is None or len(self.buffer) != self.bufsize:
@@ -1437,9 +1498,10 @@ def dtTaskInit():
     dtTaskTypes = list()
     dtTaskTypeDict = dict(cls=dict(), ru=dict(), en=dict())
     dtAllScenarios = dict()
-    for taskClass in (DTCalibrate, DTMeasureInputPower, DTCalibrateOutputPower, DTMeasureCarrierFrequency,
-                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity,\
-                      DTDMRInputModel, DTMeasureDAC):
+    for taskClass in (DTCalibrateDcComp, DTCalibrateOutputPower, DTMeasureInput,
+                      # DTMeasureInputPower, DTMeasureCarrierFrequency,
+                      DTMeasureNonlinearity, DTDMRInput, DTDMROutput, DTMeasureSensitivity,
+                      DTDMRInputModel, DTMeasureDAC, DTCalibrateDemodGain):
         dtTaskTypes.append(taskClass)
         dtTaskTypeDict['cls'][taskClass.__name__] = taskClass
         dtTaskTypeDict['ru'][taskClass.name['ru']] = taskClass
