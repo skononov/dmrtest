@@ -1,0 +1,14 @@
+31.08.2021
+Finding demodulator gain for different input power
+Task: DTCalibrateDemodGain
+Parameter frequency set to 575.574 MHz
+MOTOTRBO TEST MODE Carrier Squelch, Channel 4, Fc = 575.575 MHz
+Input power [dBm]  RMS [V] Demod gain
+-42    0.022   100
+-38    0.030    96
+-19    0.030    60
+-21    0.031    64
+-14    0.030    51
+-4.3   0.030    32
+6.5    0.031    12
+7.7    0.030     9
