@@ -20,13 +20,13 @@ def get_pll_regs(freq: int):
     return list(regs)
 
 
-def get_peak(amp, start: int, end: int):
+def get_peak(amp, start: int, end: int, strict: bool = True):
     """ Return peak power and weghted mean frequency for a given FFT spectrum
     """
     c_amp = (c_double*len(amp))(*amp)
     c_pwr = c_double(0)
     c_fpeak = c_double(0)
-    rc = _libdmr.peak_search(c_amp, c_int(start), c_int(end),
+    rc = _libdmr.peak_search(c_amp, c_int(start), c_int(end), c_int(strict),
                              byref(c_pwr), byref(c_fpeak))
     if rc == c_int(0):
         return None, None

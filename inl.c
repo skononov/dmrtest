@@ -20,7 +20,7 @@
 
 //fmin, fmax - span in amp[] index
 //if peak is bad, return 0
-int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfpeak)
+int peak_search(const double *amp, int fmin, int fmax, int strict, double *ppwr, double *pfpeak)
 {
 	static const double eps = 0.000001;
 	static const double epsraw = 0.01;
@@ -70,7 +70,7 @@ int peak_search(const double *amp, int fmin, int fmax, double *ppwr, double *pfp
 	}
 	*pfpeak /= *ppwr;
 
-	//if(bp>fmax || bm<fmin) return 0;
+	if(strict && (bp>fmax || bm<fmin)) return 0;
 
 	return 1;
 }
@@ -115,7 +115,7 @@ int get_inl_fm(const double *amp, int num, double fm, double *pinl, double *ph)
 	int fmax = (int)limit((fm*(1+freqwh)), 0, num-1);
 
 	//find the main harmonic frequency & power
-	if (fmin==fmax || !peak_search(amp, fmin, fmax, &p1, &fest)) {
+	if (fmin==fmax || !peak_search(amp, fmin, fmax, 0, &p1, &fest)) {
 		fprintf(stderr, "Could not find the main frequency peak\n");
 		return 0;
 	}
@@ -124,12 +124,12 @@ int get_inl_fm(const double *amp, int num, double fm, double *pinl, double *ph)
 	fmax = (int)limit((2*fest*(1+freqwh)), 0, num-1);
 
 	//find the second harmonic frequency & power
-	if (fmin==fmax || !peak_search(amp, fmin, fmax, &p2, &tmp)) {
+	if (fmin==fmax || !peak_search(amp, fmin, fmax, 0, &p2, &tmp)) {
 		fprintf(stderr, "Could not find the second harmonic peak\n");
 		return 0;
 	}
 
-	double g = log(sqrt(p2/p1));
+	double g = log(p2/p1)/2;
 	int ih;
 	//determine h for a given ratio of second and first harmonics amplitudes
 	for(ih=0; ih<NH; ih++) {
@@ -167,7 +167,7 @@ int get_inl_fm(const double *amp, int num, double fm, double *pinl, double *ph)
 	for(i=3; i<30; i++) {
 		fmin = (int)limit(i*fest*(1-freqwh), 0, num-1);
 		fmax = (int)limit(i*fest*(1+freqwh), 0, num-1);
-		if (fmin==fmax || !peak_search(amp, fmin, fmax, &pn, &tmp)) break;
+		if (fmin==fmax || !peak_search(amp, fmin, fmax, 1, &pn, &tmp)) break;
 		jnratio2 = jn(i, h) / jnref;
 		jnratio2 *= jnratio2;
 		pnr = pref * jnratio2;
@@ -197,7 +197,7 @@ int get_inl(const double *amp, int num, double fm, double *pinl)
 	int fmax = (int)limit((fm*(1+freqwh)), 0, num-1);
 
 	//find the main harmonic frequency & power
-	if (fmin==fmax || !peak_search(amp, fmin, fmax, &p1, &fest)) {
+	if (fmin==fmax || !peak_search(amp, fmin, fmax, 0, &p1, &fest)) {
 		fprintf(stderr, "Could not find the main frequency peak\n");
 		return 0;
 	}
@@ -207,13 +207,11 @@ int get_inl(const double *amp, int num, double fm, double *pinl)
 	for(i=2; i<30; i++) {
 		fmin = (int)limit(i*fest*(1-freqwh), 0, num-1);
 		fmax = (int)limit(i*fest*(1+freqwh), 0, num-1);
-		if (fmin==fmax || !peak_search(amp, fmin, fmax, &pn, &tmp)) break;
+		if (fmin==fmax || !peak_search(amp, fmin, fmax, 1, &pn, &tmp)) break;
 		if (pn < 1e-15*pd) break;
 		pd += pn;
 	}
 	//printf("stopped at harmonic %d\n", i);
-
-	if (pd==0) return 0;
 
 	*pinl = sqrt(pd/(pd+p1));
 
