@@ -1,8 +1,10 @@
+==========
 31.08.2021
+==========
 Finding demodulator gain for different input power
 Task: DTCalibrateDemodGain
-Parameter frequency set to 575.574 MHz
-MOTOTRBO TEST MODE Carrier Squelch, Channel 4, Fc = 575.575 MHz
+PLL frequency set to 155.574 MHz
+MOTOTRBO TEST MODE Carrier Squelch, Channel 4, Fc = 155.575 MHz
 Input power [dBm]  RMS [V] Demod gain
 -42    0.022   100
 -38    0.030    96
@@ -12,3 +14,59 @@ Input power [dBm]  RMS [V] Demod gain
 -4.3   0.030    32
 6.5    0.031    12
 7.7    0.030     9
+
+==========
+02.09.2021
+==========
+RMS of the signal for different input power and carrier frequency
+Task: DTMeasureInput
+MOTOTRBO TEST MODE Carrier Squelch, Channel 4, Fc = 155.575 MHz
+
+PLL frequency set to 155.574 MHz
+--------------------------------
+Carrier off:
+DTMeasureInput: Input power -63.25 dBm, set demodulator gain 100
+Unshited carrier: signal RMS 0.000402 V, amplitude of main harmonics 0.000102 V
+5.0-kHz shifted carrier: signal RMS 0.000403 V, amplitude of main harmonics 0.000121 V
+
+Carrier on:
+DTMeasureInput: Input power -21.89 dBm, set demodulator gain 63
+Unshited carrier: signal RMS  0.0246 V, amplitude of main harmonics  0.0347 V
+5.0-kHz shifted carrier: signal RMS  0.0245 V, amplitude of main harmonics  0.0346 V
+
+DTMeasureInput: Input power -12.50 dBm, set demodulator gain 45
+Unshited carrier: signal RMS  0.0244 V, amplitude of main harmonics  0.0345 V
+5.0-kHz shifted carrier: signal RMS  0.0243 V, amplitude of main harmonics  0.0344 V
+
+DTMeasureInput: Input power 1.20 dBm, set demodulator gain 17
+Unshited carrier: signal RMS   0.021 V, amplitude of main harmonics  0.0296 V
+5.0-kHz shifted carrier: signal RMS  0.0209 V, amplitude of main harmonics  0.0295 V
+
+DTMeasureInput: Input power 4.75 dBm, set demodulator gain 10
+Unshited carrier: signal RMS  0.0214 V, amplitude of main harmonics  0.0303 V
+5.0-kHz shifted carrier: signal RMS  0.0214 V, amplitude of main harmonics  0.0303 V
+
+DTMeasureInput: Input power -44.09 dBm, set demodulator gain 100
+Unshited carrier: signal RMS   0.017 V, amplitude of main harmonics   0.024 V
+5.0-kHz shifted carrier: signal RMS  0.0169 V, amplitude of main harmonics  0.0238 V
+
+PLL frequency set to 150.0 MHz
+------------------------------
+Carrier off:
+DTMeasureInput: Input power -63.25 dBm, set demodulator gain 100
+Unshited carrier: signal RMS 0.000398 V, amplitude of main harmonics 0.000141 V
+5.0-kHz shifted carrier: signal RMS 0.000369 V, amplitude of main harmonics 0.000171 V
+
+Carrier on:
+DTMeasureInput: Input power 4.75 dBm, set demodulator gain 10
+Unshited carrier: signal RMS 0.000396 V, amplitude of main harmonics 0.000112 V
+5.0-kHz shifted carrier: signal RMS 0.000546 V, amplitude of main harmonics 0.000242 V
+
+DTMeasureInput: Input power -22.02 dBm, set demodulator gain 64
+Unshited carrier: signal RMS 0.000374 V, amplitude of main harmonics 0.000172 V
+5.0-kHz shifted carrier: signal RMS 0.000399 V, amplitude of main harmonics 0.000112 V
+
+Carrier off (coaxial input physicaly disconnected):
+DTMeasureInput: Input power -63.25 dBm, set demodulator gain 100
+Unshited carrier: signal RMS 0.000369 V, amplitude of main harmonics 0.000152 V
+5.0-kHz shifted carrier: signal RMS 0.000378 V, amplitude of main harmonics 0.000146 V
