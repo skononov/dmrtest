@@ -180,9 +180,11 @@ int getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, 
 	//printf("getpllreg(%d)\n", setfreq);
 
 	pll_set resset;
+	unsigned int add;
 
 	int Rmax=50;
-	pll(setfreq, &resset, 0, 1, Rmax, 65535, 23, 4095, 10, 4400, 2200, 50);
+	pll(setfreq, &resset, 0, 1, Rmax, 65535, 23, 4095, 10, 4400, 2200, 50); add=0;
+	//pll(setfreq, &resset, 0, 1, Rmax, 65535, 23, 4095, 5, 4400, 2200, 50); add=(1<<24);
 	
 	int divdeg=-1;
 	while(resset.outdiv){
@@ -196,7 +198,7 @@ int getpllreg(unsigned int setfreq, int maino, int auxo, int mltd, int mainpow, 
 	// reg val
 	R[0]=(resset.FRAC<<3) + (resset.INT<<15);
 	R[1]=1 + (resset.MOD<<3) + (1<<15);
-	R[2]=2 + (3<<6) + (nm<<8) + (15<<9) + (resset.R<<14) + (6<<26);
+	R[2]=2 + (3<<6) + (nm<<8) + (15<<9) + (resset.R<<14) + (6<<26) + add;
 	R[3]=3 + (156<<3);
 	R[4]=4 + (mainpow<<3) + (maino<<5) + (auxpow<<6) + (auxo<<8) + (mltd<<10) + (resset.BandDiv<<12) + (divdeg<<20) + (1<<23);
 	R[5]=5 + (1<<22) + (3<<19);
