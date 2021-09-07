@@ -482,9 +482,11 @@ class DTMeasurePower(DTTask):
         self.set_success()
         return self
 
-    def measurePower(self):
+    def measurePower(self, avenum=5):
         """Measure input and output powers [dBm]"""
-        counts = self.com.command('GET PWR', int(self.parameters['avenum']), nreply=2)
+        if 'avenum' in self.parameters:
+            avenum = int(self.parameters['avenum'])
+        counts = self.com.command('GET PWR', avenum, nreply=2)
         return [((c-self.atcPedestal) * self.adcCountTomV - self.voltageShift) * self.mVTodBm + self.powerShift for c in counts]
 
     def getDemodGain(self, inpwr):
@@ -544,15 +546,19 @@ class DTMeasureInput(DTMeasurePower):
     Measuring input power and carrier frequency.
     """
     nominalCarrierOffset = 5*kHz  # auxillary offset of PLL frequency
+    minSignalRMS = 0.001  # low limit of signal RMS [V]. If signal RMS is less than that report absence of carrier.
 
     name = dict(ru='Измерение аналогового входа', en='Measuring analogue input')
 
     def __init__(self):
         super().__init__(('frequency', 'avenum', 'datanum'), ('INPOWER', 'CARRIER', 'FFT', 'ADC_I'))
+        self.buffer0 = None
         self.buffer = None
 
     def init_meas(self, **kwargs):
         super().init_meas(**kwargs)
+        self.buffer0 = None
+        self.buffer = None
         if self.failed:
             return self
 
@@ -563,19 +569,24 @@ class DTMeasureInput(DTMeasurePower):
             self.set_com_error(exc)
             return self
 
+        # preparing Blackman window
+        N = int(self.parameters['datanum']) - 2
+        self.bwin = blackman(N)
+        self.bwin /= np.sqrt(sum(self.bwin**2)/N)
+
         self.inited = True
         return self
 
     def measure(self):
-        global DEBUG
+        global DEBUG, hfAdcRange, adcCountRange
         DTTask.measure(self)
         try:
             self.com.command('SET RF_PATH', 1)
-            self.results['INPOWER'] = self.measurePower()[1]
+            self.results['INPOWER'] = inpwr = self.measurePower()[1]
 
-            dmgain = self.getDemodGain(self.results['INPOWER'])
+            dmgain = self.getDemodGain(inpwr)
             if DEBUG:
-                print(f'DTMeasureInput: Set demodulator gain {dmgain}')
+                print(f'DTMeasureInput: Input power {inpwr:.2f} dBm, set demodulator gain {dmgain:d}')
             self.com.command('SET DEMOD', [1, dmgain])
 
             self.com.command('SET RF_PATH', 0)
@@ -584,9 +595,9 @@ class DTMeasureInput(DTMeasurePower):
                 self.set_pll_error()
                 return self
 
-            bsize = int(self.parameters['datanum'])
+            N = int(self.parameters['datanum'])
             # reading ADC data 1st time
-            self.buffer0 = self.com.command('GET ADC DAT', [1, bsize], nreply=bsize)
+            self.buffer0 = self.com.command('GET ADC DAT', [1, N], nreply=N)
 
             isset = self.com.set_pll_freq(2, int(self.parameters['frequency'] + self.nominalCarrierOffset))
             if not isset:
@@ -594,7 +605,7 @@ class DTMeasureInput(DTMeasurePower):
                 return self
 
             # reading ADC data 2nd time
-            self.buffer = self.com.command('GET ADC DAT', [1, bsize], nreply=bsize)
+            self.buffer = self.com.command('GET ADC DAT', [1, N], nreply=N)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
@@ -611,34 +622,39 @@ class DTMeasureInput(DTMeasurePower):
 
     def __eval_carrier_freq(self):
         global hfAdcRange, adcCountRange, adcSampleFrequency
-        if self.buffer is None or self.buffer0.size != self.buffer.size != self.parameters['datanum']:
-            self.set_eval_error('Несогласующийся размер буффера' if dtg.LANG == 'ru'
+        if self.buffer0 is None or self.buffer is None or self.buffer0.size != self.buffer.size or\
+           self.buffer0.size != self.parameters['datanum']:
+            self.set_eval_error('Ошибка размера буффера' if dtg.LANG == 'ru'
                                 else 'Inconsistent data buffer size')
             return None
 
-        N = self.parameters['datanum']
-        # preparing Blackman window
-        bwin = blackman(N)
-        bwin /= np.sqrt(sum(bwin**2)/N)
+        N = int(self.parameters['datanum']) - 2
 
         # convert data to volts and subtract DC component
-        It0 = self.buffer0 * (2 * hfAdcRange / adcCountRange)
+        It0 = self.buffer0[1:N+1] * (2 * hfAdcRange / adcCountRange)
         self.results['ADC_I'] = It0 - hfAdcRange
         It0 -= np.mean(It0)
         # FFT for nominal PLL frequency
-        a0 = 2/N*np.abs(rfft(bwin*It0))
+        a0 = 2/N*np.abs(rfft(self.bwin*It0))
         self.results['FFT'] = 20*np.log10(a0/np.max(a0))  # dB
 
         # convert data to float64 and subtract DC component
-        It = self.buffer * (2 * hfAdcRange / adcCountRange)
+        It = self.buffer[1:N+1] * (2 * hfAdcRange / adcCountRange)
         It -= np.mean(It)
         # FFT for PLL frequency with offset
-        aoff = 2/N*np.abs(rfft(bwin*It))
+        aoff = 2/N*np.abs(rfft(self.bwin*It))
 
         p0, f0 = get_peak(a0, 0, len(a0)-1)
         poff, foff = get_peak(aoff, 0, len(aoff)-1)
 
-        if p0 == 0 or poff == 0:  # could not find peaks
+        if DEBUG:
+            print(f'Unshited carrier: signal RMS {It0.std():7.3g} V, amplitude of main harmonics {np.sqrt(p0):7.3g} V' +
+                  f', peak-peak {np.max(It0)-np.min(It0):7.3g} V')
+            print(f'{self.nominalCarrierOffset/kHz}-kHz shifted carrier: signal RMS {It.std():7.3g} V' +
+                  f', amplitude of main harmonics {np.sqrt(poff):7.3g} V, peak-peak {np.max(It)-np.min(It):7.3g} V')
+
+        if It0.std() < self.minSignalRMS or It.std() < self.minSignalRMS or\
+           p0 is None or p0 == 0 or poff is None or poff == 0:
             self.set_message('Сигнал несущей не обнаружен' if dtg.LANG == 'ru' else 'No carrier signal')
             return None
 
@@ -684,7 +700,7 @@ class DTCalibrateDemodGain(DTMeasurePower):
             return self
 
         # preparing Blackman window
-        N = int(self.parameters['datanum'])
+        N = int(self.parameters['datanum']) - 2
         self.bwin = blackman(N)
         self.bwin /= np.sqrt(sum(self.bwin**2)/N)
 
@@ -722,11 +738,11 @@ class DTCalibrateDemodGain(DTMeasurePower):
     def __eval_spectrum(self):
         global hfAdcRange, adcCountRange, adcSampleFrequency
 
-        N = int(self.parameters['datanum'])
+        N = int(self.parameters['datanum']) - 2
         self.buffer = self.com.command('GET ADC DAT', [1, N], nreply=N)
 
         # convert data to volts and subtract DC component
-        It0: np.ndarray = self.buffer * (2 * hfAdcRange / adcCountRange)
+        It0: np.ndarray = self.buffer[1:N+1] * (2 * hfAdcRange / adcCountRange)
         self.results['HFARMS'] = It0.std()
         self.results['ADC_I'] = It0 - hfAdcRange
         It0 -= np.mean(It0)
@@ -748,11 +764,13 @@ class DTCalibrateDemodGain(DTMeasurePower):
         return True
 
 
-class DTMeasureNonlinearity(DTTask):
+class DTMeasureNonlinearity(DTMeasurePower):
     """
     Measuring nonlinearity.
     """
-    name = dict(ru='Измерение КНИ', en='THD measurement')
+    name = dict(ru='Измерение КНИ', en='INL measurement')
+
+    minSignalRMS = 0.001  # [V]
 
     def __init__(self):
         super().__init__(('frequency', 'modamp', 'modfrequency', 'datanum'),
@@ -766,10 +784,18 @@ class DTMeasureNonlinearity(DTTask):
         macode = int(self.parameters['modamp']*0xFFFF)
         mfcode = int(self.parameters['modfrequency']/(120*kHz)*(1 << 16)+0.5)
 
+        # preparing Blackman window
+        N = int(self.parameters['datanum']) - 2
+        self.bwin = blackman(N)
+        self.bwin /= np.sqrt(sum(self.bwin**2)/N)
+
+        if DEBUG:
+            print(f'DTMeasureNonlinearity: LF amp. code {macode}, LF freq. code {mfcode}')
+
         try:
-            self.com.command('SET RF_PATH', 0)
+            self.com.command('SET MOD', 0)
             self.com.command('SET MEASST', 2)
-            isset = self.com.set_pll_freq(1, int(self.parameters['frequency']))
+            isset = self.com.set_pll_freq(2, int(self.parameters['frequency']))
             if not isset:
                 self.set_pll_error()
                 return self
@@ -783,25 +809,26 @@ class DTMeasureNonlinearity(DTTask):
         return self
 
     def measure(self):
-        super().measure()
-        if self.failed:
-            return self
-
+        global DEBUG, hfAdcRange, adcCountRange
+        DTTask.measure(self)
         try:
+            self.com.command('SET RF_PATH', 1)
+            inpwr = self.measurePower()[1]
+            dmgain = self.getDemodGain(inpwr)
+            if DEBUG:
+                print(f'DTMeasureNonlinearity: Input power {inpwr:.2f} dBm, set demodulator gain {dmgain:d}')
+            self.com.command('SET DEMOD', [1, dmgain])
+
             # reading ADC data
+            self.com.command('SET RF_PATH', 0)
             datanum = int(self.parameters['datanum'])
             self.buffer = self.com.command('GET ADC DAT', [2, 2*datanum], nreply=2*datanum)
         except DTComError as exc:
             self.set_com_error(exc)
             return self
 
-        if min(self.buffer) == 0 or max(self.buffer) == adcCountRange-1:
-            self.set_eval_error('Сигнал вне диапазона АЦП' if dtg.LANG == 'ru' else 'Signal is out of ADC range')
-            return self
-
         res = self.__eval_inl()
         if res is None:
-            self.set_eval_error()
             return self
 
         self.results['INL'] = res[0]
@@ -812,29 +839,31 @@ class DTMeasureNonlinearity(DTTask):
 
     def __eval_inl(self):
         global hfAdcRange, adcCountRange, adcSampleFrequency
-        if self.buffer is None:
+        if self.buffer is None or len(self.buffer) != 2*self.parameters['datanum']:
+            self.set_eval_error('Ошибка размера буффера' if dtg.LANG == 'ru'
+                                else 'Inconsistent data buffer size')
             return None
 
-        # check that buffer length is even
-        if len(self.buffer) & 1 == 1:
-            return None
-
-        N = len(self.buffer)//2
-
-        # preparing Blackman window
-        bwin = blackman(N)
-        bwin /= np.sqrt(sum(bwin**2)/N)
+        N = int(self.parameters['datanum']) - 2
 
         # convert data to Volts and subtract DC component
-        It = self.buffer[:N] * (2 * hfAdcRange / adcCountRange)  # take first half of the buffer as the I input
+        It = self.buffer[1:N+1] * (2 * hfAdcRange / adcCountRange)  # take first half of the buffer as the I input
         self.results['ADC_I'] = It - hfAdcRange
         It -= np.mean(It)
-        Qt = self.buffer[N:] * (2 * hfAdcRange / adcCountRange)  # take second half of the buffer as the Q input
+        Qt = self.buffer[N+2:] * (2 * hfAdcRange / adcCountRange)  # take second half of the buffer as the Q input
         self.results['ADC_Q'] = Qt - hfAdcRange
         Qt -= np.mean(Qt)
+
+        if It.std() < self.minSignalRMS or Qt.std() < self.minSignalRMS:
+            self.set_message('Сигнал несущей не обнаружен' if dtg.LANG == 'ru' else 'No carrier signal')
+            return None, None
+
+        if DEBUG:
+            print(f'DTMeasureNonlinearity: I-signal RMS {It.std():7.3g} V, Q-signal RMS {Qt.std():7.3g} V')
+
         # Compute FFT (non-negative frequencies only)
-        If = 2/N*np.abs(rfft(bwin*It))
-        Qf = 2/N*np.abs(rfft(bwin*Qt))
+        If = 2/N*np.abs(rfft(self.bwin*It))
+        Qf = 2/N*np.abs(rfft(self.bwin*Qt))
         Af = np.sqrt(If**2 + Qf**2)
 
         self.results['FFT'] = 20*np.log10(Af/np.max(Af))  # dB
@@ -993,6 +1022,10 @@ class DTMeasureSensitivity(DTTask):
         if self.failed:
             return self
 
+        N = int(self.parameters['datanum']) - 2
+        self.bwin = blackman(N)
+        self.bwin /= np.sqrt(sum(self.bwin**2)/N)
+
         try:
             self.com.command('SET MEASST', 4)
 
@@ -1068,7 +1101,7 @@ class DTMeasureSensitivity(DTTask):
 
     def __scan_adc_range(self, limit, keepin, tsize=256):
         """Scan ADC range until readings are in the given limit"""
-        global lfAdcVoltRanges
+        global lfAdcVoltRanges, adcCountRange
         maxamp = adcCountRange - 1
         l, u = (1-limit)/2, (1+limit)/2
         rscan = range(len(lfAdcVoltRanges)-1, -1, -1) if keepin else range(len(lfAdcVoltRanges))
@@ -1138,17 +1171,16 @@ class DTMeasureSensitivity(DTTask):
         if self.buffer is None:
             return None
 
-        N = len(self.buffer)
-        bwin = blackman(N)
-        bwin /= np.sqrt(sum(bwin**2)/N)
+        # omit first and last points in ADC data
+        N = len(self.buffer) - 2
 
         # convert data to Volts and subtract DC component
-        It = self.buffer * (2 * lfAdcVoltRanges[self.adcrange] / adcCountRange)
+        It = self.buffer[1:N+1] * (2 * lfAdcVoltRanges[self.adcrange] / adcCountRange)
         self.results['ADC_I'] = It - lfAdcVoltRanges[self.adcrange]
         It -= np.mean(It)
 
         # Compute FFT (non-negative frequencies only)
-        af = 2/N*np.abs(rfft(bwin*It))
+        af = 2/N*np.abs(rfft(self.bwin*It))
 
         self.results['FFT'] = 20*np.log10(af/np.max(af))  # dB
 
@@ -1174,6 +1206,10 @@ class DTMeasureDAC(DTTask):
         super().init_meas(**kwargs)
         if self.failed:
             return self
+
+        N = int(self.parameters['datanum']) - 2
+        self.bwin = blackman(N)
+        self.bwin /= np.sqrt(sum(self.bwin**2)/N)
 
         macode = int(self.parameters['modamp']*0xFFFF)
         mfcode = int(self.parameters['modfrequency']/(120*kHz)*(1 << 16)+0.5)
@@ -1226,17 +1262,16 @@ class DTMeasureDAC(DTTask):
     def __eval_freq_inl(self):
         global DEBUG, lfAdcVoltRanges, adcSampleFrequency
 
-        N = len(self.buffer)
-        bwin = blackman(N)
-        bwin /= np.sqrt(sum(bwin**2)/N)
+        # omit firts and last point in ADC data
+        N = len(self.buffer) - 2
 
         # convert data to Volts and subtract DC component
-        It = self.buffer * (2 * lfAdcVoltRanges[self.adccode] / adcCountRange)
+        It = self.buffer[1:N+1] * (2 * lfAdcVoltRanges[self.adccode] / adcCountRange)
         self.results['ADC_I'] = It - lfAdcVoltRanges[self.adccode]
         It -= np.mean(It)
 
         # Compute FFT (non-negative frequencies only)
-        af = 2/N*np.abs(rfft(bwin*It))
+        af = 2/N*np.abs(rfft(self.bwin*It))
 
         self.results['FFT'] = 20*np.log10(af/np.max(af))  # dB
 
