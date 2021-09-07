@@ -4,7 +4,7 @@ from multiprocessing.connection import Connection
 from traceback import print_exc
 
 import tasks
-from tasks import DTTask, DTCalibrate
+from tasks import DTTask, DTCalibrateDcComp
 from dtcom import DTSerialCom
 
 
@@ -16,7 +16,7 @@ class DTProcess(Process):
     def __init__(self, conn: Connection):
         super().__init__()
         self.conn = conn
-        self.caltask = DTCalibrate()
+        self.caltask = DTCalibrateDcComp()
         self.calibPeriod = 600  # 10 min
 
     def calibrate(self):
@@ -33,14 +33,14 @@ class DTProcess(Process):
         onoff = {True: 'ON', False: 'OFF'}
 
         # Calibration after the start
-        self.calibrate()
+        #self.calibrate()
 
         while True:  # event loop
             # periodic calibration
-            if time() - self.prevCalTime >= self.calibPeriod:
-                self.calibrate()
-            if not self.conn.poll(self.calibPeriod/10):
-                continue
+            #if time() - self.prevCalTime >= self.calibPeriod:
+            #    self.calibrate()
+            #if not self.conn.poll(self.calibPeriod/10):
+            #    continue
             obj = self.conn.recv()
             if isinstance(obj, DTTask):
                 self.__runTask(obj)
