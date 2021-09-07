@@ -20,12 +20,12 @@ if __name__ == "__main__":
     rng = default_rng(int(time()))
 
     print("\nTesting spectrum peak search & INL")
-    A0 = 1  # amplitude of the main harmonic in Volts
+    A0 = 0.001  # amplitude of the main harmonic in Volts
     A0c = A0/hfAdcRange*(2**31)  # amplitude of main harmonics in ADC LSB
     N = 16384  # number of ADC counts
     T = 1/120000.  # sampling period in s
     fm = 1000  # modulating frequency
-    h = 0.6  # modulation index
+    h = 1  # modulation index
     nh = 20  # number of harmonics counted
     rmsnoise = 0.001  # rms of noise added in Volts
     rmsnoise_c = rmsnoise/hfAdcRange*(2**31)  # rms of noise added in ADC LSB
@@ -35,6 +35,8 @@ if __name__ == "__main__":
 
     at = floor(sum([A0c * jn(n, h)/jn(1, h) * sin(2*pi*(n*fm*t + rng.random())) for n in range(1, nh+1)]) +
                rng.normal(0, rmsnoise_c, N)) / (2**31) * hfAdcRange
+
+    print(f'RMS of the waveform: {at.std():7.3g}')
 
     bwin = blackman(N)
     bwin /= sqrt(sum(bwin**2)/N)
